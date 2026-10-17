@@ -24,7 +24,7 @@ git clone https://github.com/weareoneconnection/InfraPilot-AI.git && cd InfraPil
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ./run.sh                    # http://127.0.0.1:8101
-pytest -q                   # 29 项测试
+pytest -q                   # 39 项测试
 python evals/run_eval.py    # 34 项基准
 ```
 
