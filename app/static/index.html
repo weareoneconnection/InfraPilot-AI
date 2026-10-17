@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#06101d">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect rx='16' width='64' height='64' fill='%2362b3ff'/><text x='32' y='41' text-anchor='middle' font-size='25' font-family='Arial' font-weight='700' fill='%2305101c'>IP</text></svg>">
 <title>InfraPilot AI</title>
 <style>
 :root{--bg:#08101c;--panel:#0f1b2c;--panel2:#142338;--line:#24364f;--text:#edf4ff;--muted:#93a7c2;--accent:#5aa9ff;--ok:#5fd6a1;--warn:#ffc46b;--bad:#ff7c86;--crit:#ff4d6d;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -26,11 +28,38 @@ textarea,input,select{width:100%;background:#070e19;border:1px solid var(--line)
 .fuse{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted)}
 .muted{color:var(--muted)}.small{font-size:12px}
 @media(max-width:900px){.grid{grid-template-columns:1fr}.flow{grid-template-columns:repeat(3,1fr)}.photos figure,.photos img{width:44vw}}
+/* Competition UI 3.0 ------------------------------------------------------ */
+:root{--bg:#06101d;--panel:rgba(12,27,47,.91);--panel2:rgba(18,39,66,.9);--line:rgba(86,172,255,.18);--text:#f3f8ff;--muted:#94abc7;--accent:#62b3ff;--accent2:#5ce1dc;--ok:#5ee0aa;--warn:#ffd06e;--bad:#ff7c91;--crit:#ff4f72;--shadow:0 24px 70px rgba(0,0,0,.3)}
+html{scroll-behavior:smooth}body{min-height:100vh;background:
+radial-gradient(circle at 10% -8%,rgba(45,134,255,.22),transparent 31rem),
+radial-gradient(circle at 94% 10%,rgba(62,219,212,.12),transparent 27rem),
+linear-gradient(180deg,#06101d,#071322 48%,#050d18);letter-spacing:.005em}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.18;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,#000,transparent 78%)}
+.appbar{position:sticky;top:0;z-index:40;border-bottom:1px solid rgba(255,255,255,.07);background:rgba(5,13,24,.78);backdrop-filter:blur(18px)}.appbar-inner{max-width:1400px;margin:auto;height:58px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.brand{display:flex;align-items:center;gap:11px;font-weight:850;letter-spacing:.04em}.brand-mark{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 0 30px rgba(73,161,255,.3);color:#05101c;font:900 12px var(--mono)}.brand small{display:block;color:var(--muted);font-size:9px;font-weight:700;letter-spacing:.16em}.app-status{display:flex;align-items:center;gap:8px;color:#b7c9df;font-size:11px;font-weight:700;letter-spacing:.1em}.pulse{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 5px rgba(94,224,170,.1),0 0 16px var(--ok)}
+main{max-width:1400px;padding:28px 24px 72px;position:relative}header.hero{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) minmax(420px,560px);align-items:center;padding:32px 34px;border:1px solid rgba(98,179,255,.2);border-radius:24px;background:linear-gradient(125deg,rgba(15,45,79,.92),rgba(8,28,47,.82));box-shadow:var(--shadow)}
+header.hero:after{content:"OPS";position:absolute;right:-1rem;top:-3.8rem;font:900 12rem/1 var(--mono);color:rgba(98,179,255,.04);pointer-events:none}.hero-copy{position:relative;z-index:1}.ey{color:#78c0ff;letter-spacing:.18em}.hero h1{font-size:clamp(36px,5vw,58px);letter-spacing:-.045em;line-height:1;margin:10px 0 14px}.hero h1 span{color:var(--accent2)}.sub{font-size:15px;line-height:1.75;max-width:800px}.hero-notes{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.hero-note{padding:5px 10px;border:1px solid rgba(255,255,255,.1);border-radius:999px;color:#c6d8ec;background:rgba(255,255,255,.035);font-size:11px}.hero-note:before{content:"✓";color:var(--ok);margin-right:6px}
+.kpis{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,minmax(105px,1fr));gap:8px}.kpi{min-width:0;padding:10px 12px;border-color:rgba(255,255,255,.1);background:rgba(5,18,34,.48);backdrop-filter:blur(9px)}.kpi b{font:800 23px/1.1 var(--mono)}.kpi span{display:block;margin-top:4px;letter-spacing:.04em}
+.flow{counter-reset:flow;position:relative;margin:18px 0 20px;gap:7px}.flow:before{content:"";position:absolute;left:4%;right:4%;top:24px;height:1px;background:linear-gradient(90deg,transparent,var(--accent),var(--accent2),transparent);opacity:.3}.flow div{counter-increment:flow;position:relative;min-height:68px;padding:12px 5px 7px;border-color:rgba(255,255,255,.085);border-radius:13px;background:rgba(11,27,48,.74);transition:.2s}.flow div:hover{transform:translateY(-2px);border-color:rgba(98,179,255,.42);background:rgba(17,42,71,.95)}.flow div:before{content:"0" counter(flow);display:block;width:23px;height:23px;margin:0 auto 5px;border-radius:8px;background:#0d223c;border:1px solid rgba(98,179,255,.3);color:#90c9ff;font:700 9px/21px var(--mono)}
+.grid{grid-template-columns:minmax(320px,370px) minmax(0,1fr);gap:18px}.card{position:relative;border-color:rgba(255,255,255,.085);border-radius:20px;padding:19px;background:linear-gradient(160deg,rgba(12,29,51,.95),rgba(7,20,36,.92));box-shadow:0 16px 48px rgba(0,0,0,.2);backdrop-filter:blur(12px)}.card:before{content:"";position:absolute;left:18px;right:18px;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(98,179,255,.58),transparent)}
+h2{font-size:16px;letter-spacing:-.01em}h3{font-size:11px;text-transform:uppercase;letter-spacing:.12em}
+textarea,input,select{background:rgba(3,11,21,.78);border-color:rgba(255,255,255,.1);transition:border-color .2s,box-shadow .2s}textarea:focus,input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(98,179,255,.12)}input[type=checkbox]{accent-color:var(--accent)}
+.btn{min-height:40px;border-radius:11px;background:linear-gradient(135deg,#247ee9,#4ca7ff);box-shadow:0 9px 24px rgba(32,117,225,.2);transition:transform .18s,filter .18s}.btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.08)}.btn:focus-visible,.ev:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}.btn.alt{box-shadow:none;background:rgba(255,255,255,.045)}.btn.ok{background:linear-gradient(135deg,#19885c,#39c98c)}
+.ev{position:relative;padding:12px 13px;border-color:rgba(255,255,255,.08);background:rgba(255,255,255,.035);transition:.18s}.ev:hover{transform:translateX(2px);border-color:rgba(98,179,255,.32)}.ev.on{border-color:var(--accent);box-shadow:0 0 0 3px rgba(98,179,255,.08),inset 3px 0 0 var(--accent)}.item{padding:12px 13px;border-color:rgba(255,255,255,.08);background:rgba(255,255,255,.034);box-shadow:inset 3px 0 0 rgba(98,179,255,.13)}.stop{position:relative;overflow:hidden;padding:12px 14px;border-color:rgba(255,79,114,.48);background:linear-gradient(100deg,rgba(126,21,48,.64),rgba(74,20,41,.38));box-shadow:0 8px 26px rgba(111,18,43,.18)}.stop:after{content:"STOP";position:absolute;right:8px;top:-14px;font:900 52px var(--mono);color:rgba(255,255,255,.035)}
+.r,.st,.ref{display:inline-flex;align-items:center;min-height:21px}.photos img{border-radius:13px;border-color:rgba(255,255,255,.1);box-shadow:0 10px 24px rgba(0,0,0,.22)}.checks{padding:10px 0}.fuse{padding:10px 12px;border:1px solid rgba(255,255,255,.07);border-radius:12px;background:rgba(4,13,24,.45)}
+footer{display:flex;justify-content:space-between;gap:12px;margin-top:24px;padding:16px 2px 0;border-top:1px solid rgba(255,255,255,.07);color:#617a98;font:11px var(--mono);letter-spacing:.05em}
+@media(max-width:1120px){header.hero{grid-template-columns:1fr}.kpis{margin-top:22px;grid-template-columns:repeat(6,1fr)}.grid{grid-template-columns:330px minmax(0,1fr)}.flow{grid-template-columns:repeat(5,1fr)}}
+@media(max-width:900px){.grid{grid-template-columns:1fr}.flow{grid-template-columns:repeat(3,1fr)}.kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:640px){.appbar-inner{height:52px;padding:0 15px}.app-status{font-size:9px}.brand small{display:none}main{padding:16px 14px 56px}header.hero{padding:24px 20px;border-radius:20px}.hero h1{font-size:36px}.sub{font-size:13px}.kpis{grid-template-columns:repeat(2,1fr)}.flow{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px}.flow:before{display:none}.flow div{flex:0 0 118px;scroll-snap-align:start}.card{padding:16px;border-radius:17px}.row>*{max-width:100%}.btn{min-height:43px}.photos figure,.photos img{width:calc(50vw - 31px);height:auto;aspect-ratio:4/3}.checks{grid-template-columns:1fr}footer{display:block;line-height:1.8}footer span{display:block}footer span+span{margin-top:6px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 </style>
 </head>
-<body><main>
-<header><div><div class="ey">FIELD PERCEPTION · CLOSED-LOOP RECTIFICATION</div><h1>InfraPilot AI</h1>
-<p class="sub">交通基础设施现场感知与闭环整改：照片与文字定位到构件，风险只升不降并设定时限，专家智能体给出有依据的处置，人工批准后派发，整改后由独立复检用“新照片、在现场、在派发之后”证明问题真的关闭。</p></div><div class="kpis" id="kpis"></div></header>
+<body>
+<nav class="appbar"><div class="appbar-inner"><div class="brand"><span class="brand-mark">IP</span><div>InfraPilot AI<small>FIELD OPERATIONS COPILOT</small></div></div><div class="app-status"><span class="pulse"></span>FIELD CONTROL WORKSPACE</div></div></nav>
+<main>
+<header class="hero"><div class="hero-copy"><div class="ey">FIELD PERCEPTION · CLOSED-LOOP RECTIFICATION</div><h1>InfraPilot <span>AI</span></h1>
+<p class="sub">交通基础设施现场感知与闭环整改：照片与文字定位到构件，风险只升不降并设定时限，专家智能体给出有依据的处置，人工批准后派发，整改后由独立复检用“新照片、在现场、在派发之后”证明问题真的关闭。</p>
+<div class="hero-notes"><span class="hero-note">风险只升不降</span><span class="hero-note">人工批准派发</span><span class="hero-note">独立复检关单</span></div></div><div class="kpis" id="kpis"></div></header>
 <div class="flow"><div><b>感知</b>文字·照片·定位</div><div><b>定位</b>构件/GPS/扫码</div><div><b>风险</b>只升不降</div><div><b>研判</b>有依据</div><div><b>审批</b>具名人员</div><div><b>派发</b>任务与时限</div><div><b>整改</b>责任人完成</div><div><b>复检</b>独立核验</div><div><b>沉淀</b>相似先例</div></div>
 <div class="grid">
  <div>
@@ -40,12 +69,13 @@ textarea,input,select{width:100%;background:#070e19;border:1px solid var(--line)
    <div class="row"><input type="file" id="file" accept="image/*" capture="environment" style="flex:1"></div>
    <div class="row"><button class="btn alt" onclick="demoPhoto('before')">生成演示照片（整改前）</button></div>
    <div id="pending" class="k"></div>
-   <div class="row"><input id="reporter" value="班组长 李明"><button class="btn" onclick="report()">上报</button></div>
+   <div class="row"><input id="reporter" value="班组长 李明"><button class="btn" onclick="report()">上报并智能研判</button></div>
   </section>
   <section class="card" style="margin-top:12px"><h2>事件看板</h2><div id="board"></div></section>
  </div>
  <section class="card" id="detail"><h2>事件详情</h2><p class="muted">上报一条现场问题，或在左侧看板选择事件。</p></section>
 </div>
+<footer><span>C4AI THREE-TRACK SUITE · FULL-SCENARIO APPLICATION TRACK</span><span>PERCEIVE → ASSESS → APPROVE → RECTIFY → VERIFY</span></footer>
 </main>
 <script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
