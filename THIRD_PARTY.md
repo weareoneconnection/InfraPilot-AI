@@ -9,6 +9,7 @@
 | python-multipart | 0.0.32 | Apache-2.0 | Photo uploads |
 | Pillow | 13.0.0 | MIT-CMU | Perceptual hash, EXIF, synthetic photos |
 | PyYAML | 6.0.3 | MIT | Knowledge packs |
+| mcp (official MCP Python SDK) | 2.3.0 | MIT | MCP server |
 | pytest | 8.4.2 | MIT | Tests |
 
 No third-party code is vendored. Assets, knowledge sources and photos are original synthetic content.

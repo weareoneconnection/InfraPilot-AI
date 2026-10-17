@@ -23,8 +23,15 @@ InfraPilot AI 面向铁路、公路、桥梁、隧道、港口和机场的施工
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ./run.sh                    # http://127.0.0.1:8101
-pytest -q                   # 28 项测试
+pytest -q                   # 29 项测试
 python evals/run_eval.py    # 34 项基准
+```
+
+MCP（官方 MCP Python SDK v2）：巡检机器人、无人机或其他智能体可以上报观察、读取事件和看板；审批、派发、复检和关闭不通过 MCP 暴露。
+
+```bash
+python -m app.mcp_server                               # stdio
+python -m app.mcp_server --transport streamable-http   # http://127.0.0.1:8111/mcp
 ```
 
 界面上的“生成演示照片”会合成带拍摄时间和 GPS 的示例照片（不是真实现场照片），方便没有现场照片时演示完整闭环；“复用整改前照片”可以演示复检拦截。手机浏览器中的“选择文件”可以直接调用相机。

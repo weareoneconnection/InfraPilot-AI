@@ -8,7 +8,8 @@
 - Named-human approval, dispatch with owned tasks, task completion by named people.
 - Independent re-inspection verifier with 7 checks (new photo by SHA-256 and perceptual hash, after dispatch, within geofence or attested, independent inspector, tasks done, hazard cleared).
 - Precedents from closed events; dashboard (SLA compliance, first-pass verification, hotspots).
-- Synthetic photo generator; 34-case benchmark; 28 tests; mobile-first console.
+- MCP server for agents and inspection robots (reporting and reading only).
+- Synthetic photo generator; 34-case benchmark; 29 tests; mobile-first console.
 
 ## 1.0.0
 - Single-page demo of a fixed closed loop.

@@ -23,3 +23,22 @@ def test_api_closed_loop():
         assert c.post("/media", files={"file": ("x.html", b"<html>", "text/html")}).status_code == 415
         assert c.get("/dashboard").json()["events"] >= 1
         assert c.get("/").status_code == 200
+
+
+def test_mcp_tools(tmp_path):
+    import asyncio
+    import json
+
+    from mcp import Client
+
+    from app.mcp_server import EXPOSED, build_server
+    from app.service import FieldPilot
+    from app.store import Store
+
+    async def go():
+        async with Client(build_server(FieldPilot(Store(tmp_path / "m.db")))) as client:
+            assert {t.name for t in (await client.list_tools()).tools} == set(EXPOSED)
+            e = json.loads((await client.call_tool("report_observation", {"description": "BRG-03支座锈蚀和位移超过预警值"})).content[0].text)
+            assert e["asset_id"] == "BRG-03" and e["status"] == "ASSESSED"
+
+    asyncio.run(go())
