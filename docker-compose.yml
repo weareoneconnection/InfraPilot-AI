@@ -1,0 +1,7 @@
+services:
+  infrapilot:
+    build: .
+    ports: ["8101:8101"]
+    volumes: ["infrapilot-data:/data"]
+volumes:
+  infrapilot-data:
