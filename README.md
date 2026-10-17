@@ -20,6 +20,7 @@ InfraPilot AI 面向铁路、公路、桥梁、隧道、港口和机场的施工
 ## 运行
 
 ```bash
+git clone https://github.com/weareoneconnection/InfraPilot-AI.git && cd InfraPilot-AI
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ./run.sh                    # http://127.0.0.1:8101
