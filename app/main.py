@@ -77,7 +77,8 @@ def call(fn, *args, **kwargs):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "product": "InfraPilot AI", "version": __version__, "vision": "configured" if p().model else "not configured",
+    return {"status": "ok", "product": "InfraPilot AI", "version": __version__,
+            "model": p().model.describe() if p().model else "not configured",
             "assets": len(p().assets)}
 
 

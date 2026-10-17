@@ -119,3 +119,24 @@ def vision_hazards(model: Model | None, content: bytes, media_type: str, descrip
     kept = [h for h in out.get("hazards", []) if isinstance(h, dict) and h.get("label") in HAZARD_TAXONOMY
             and isinstance(h.get("confidence"), (int, float)) and h["confidence"] >= 0.5 and str(h.get("visible_evidence", "")).strip()]
     return {"hazards": kept}
+
+
+def text_hazards(model: Model | None, description: str) -> dict | None:
+    """Optional language-model reading of the report; a hazard is kept only with a verbatim quote from the report."""
+    if model is None or not description.strip():
+        return None
+    schema = {"title": "text_hazards", "type": "object", "additionalProperties": False, "required": ["hazards"],
+              "properties": {"hazards": {"type": "array", "items": {"type": "object", "additionalProperties": False,
+                                                                     "required": ["label", "confidence", "quote"],
+                                                                     "properties": {"label": {"type": "string", "enum": list(HAZARD_TAXONOMY)},
+                                                                                    "confidence": {"type": "number"},
+                                                                                    "quote": {"type": "string"}}}}}}
+    out = model.complete_json("You read a construction site report and list only hazards it clearly states. For each, copy the "
+                              "words that state it verbatim into quote. Do not infer hazards that are not written.",
+                              f"<data>{description}</data>", schema)
+    if not out:
+        return None
+    kept = [h for h in out.get("hazards", []) if isinstance(h, dict) and h.get("label") in HAZARD_TAXONOMY
+            and isinstance(h.get("confidence"), (int, float)) and h["confidence"] >= 0.5
+            and len(str(h.get("quote", "")).strip()) >= 2 and str(h["quote"]).strip() in description]
+    return {"hazards": kept}

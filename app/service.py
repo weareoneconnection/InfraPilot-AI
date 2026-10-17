@@ -27,7 +27,7 @@ from typing import Callable
 
 from .knowledge import KnowledgeIndex, load_packs
 from .llm import Model
-from .perception import HAZARD_TAXONOMY, dhash, distance_m, exif_facts, hamming, sniff, vision_hazards
+from .perception import HAZARD_TAXONOMY, dhash, distance_m, exif_facts, hamming, sniff, text_hazards, vision_hazards
 from .risk import SLA_HOURS, assess, higher, stop_work
 from .store import Store
 
@@ -150,17 +150,22 @@ class FieldPilot:
             if v and v["hazards"]:
                 vision_labels += [h["label"] for h in v["hazards"]]
                 vision_risk = higher(vision_risk or "LOW", *(HAZARD_TAXONOMY[h["label"]] for h in v["hazards"]))
-        final = higher(reported_risk, text_risk, vision_risk or "LOW")
+        model_risk, model_labels = None, []
+        t = text_hazards(self.model, description)
+        if t and t["hazards"]:
+            model_labels = [h["label"] for h in t["hazards"]]
+            model_risk = higher(*(HAZARD_TAXONOMY[h["label"]] for h in t["hazards"]))
+        final = higher(reported_risk, text_risk, vision_risk or "LOW", model_risk or "LOW")
         respond, close = SLA_HOURS[final]
         created = self.clock()
         eid = "EVT-" + uuid.uuid4().hex[:10].upper()
-        signals_all = signals + [f"vision:{v}" for v in vision_labels]
+        signals_all = signals + [f"vision:{v}" for v in vision_labels] + [f"model:{m}" for m in model_labels]
         with self.store.tx() as c:
-            c.execute("INSERT INTO events(id,project,description,asset_id,asset_method,reported_risk,text_risk,vision_risk,final_risk,signals,"
-                      "stop_work,status,reporter,lat,lon,response_due,close_due,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                      (eid, self.project, description, asset, method, reported_risk, text_risk, vision_risk, final, json.dumps(signals_all, ensure_ascii=False),
-                       int(stop_work(final, signals)), "REPORTED", reporter, lat, lon, _iso(created + timedelta(hours=respond)),
-                       _iso(created + timedelta(hours=close)), _iso(created), _iso(created)))
+            c.execute("INSERT INTO events(id,project,description,asset_id,asset_method,reported_risk,text_risk,vision_risk,model_risk,final_risk,signals,"
+                      "stop_work,status,reporter,lat,lon,response_due,close_due,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (eid, self.project, description, asset, method, reported_risk, text_risk, vision_risk, model_risk, final,
+                       json.dumps(signals_all, ensure_ascii=False), int(stop_work(final, signals or model_labels)), "REPORTED", reporter, lat, lon,
+                       _iso(created + timedelta(hours=respond)), _iso(created + timedelta(hours=close)), _iso(created), _iso(created)))
             for s in photos:
                 c.execute("INSERT OR IGNORE INTO event_media VALUES(?,?,?,?,?)", (eid, s, "before", reporter, self.now()))
             self._audit(c, eid, reporter, "event.reported", {"risk": final, "signals": signals_all, "asset": asset, "located_by": method})
@@ -200,8 +205,12 @@ class FieldPilot:
                     top = own[0]
                     confidence = round(min(0.95, 0.55 + 0.04 * top["score"]), 2)
                     claim = f"{spec['name']}：{top['title']}（{top['ref']}）— {top['text'][:160]}"
-                    c.execute("INSERT INTO findings(event_id,agent_id,status,claim,evidence_refs,confidence,questions) VALUES(?,?,?,?,?,?,?)",
-                              (event_id, sid, "SUPPORTED", claim, json.dumps([h["ref"] for h in own]), confidence, "[]"))
+                    refs, composed, questions = [h["ref"] for h in own], "rules", []
+                    drafted = self._model_finding(spec, ev["description"], own)
+                    if drafted:
+                        claim, refs, composed, questions = f"{spec['name']}：{drafted['claim']}", drafted["refs"], "model", drafted["questions"]
+                    c.execute("INSERT INTO findings(event_id,agent_id,status,claim,evidence_refs,confidence,questions,composed_by) VALUES(?,?,?,?,?,?,?,?)",
+                              (event_id, sid, "SUPPORTED", claim, json.dumps(refs), confidence, json.dumps(questions, ensure_ascii=False), composed))
                     c.execute("INSERT INTO tasks(id,event_id,title,owner_role,source,evidence_refs,status,due_at) VALUES(?,?,?,?,?,?,?,?)",
                               ("TSK-" + uuid.uuid4().hex[:8].upper(), event_id, spec["action"], spec["owner"], f"finding:{sid}",
                                json.dumps([h["ref"] for h in own]), "PROPOSED", due))
@@ -212,6 +221,28 @@ class FieldPilot:
             c.execute("UPDATE events SET status='ASSESSED', updated_at=? WHERE id=?", (self.now(), event_id))
             self._audit(c, event_id, "system", "event.assessed", {"team": team})
         return self.event(event_id)
+
+    def _model_finding(self, spec: dict, description: str, hits: list[dict]) -> dict | None:
+        """Model-written finding for one specialist; kept only if it cites sources this specialist retrieved."""
+        if self.model is None:
+            return None
+        refs = [h["ref"] for h in hits]
+        schema = {"title": "field_finding", "type": "object", "additionalProperties": False, "required": ["claim", "evidence_refs", "questions"],
+                  "properties": {"claim": {"type": "string"}, "evidence_refs": {"type": "array", "items": {"type": "string", "enum": refs}},
+                                 "questions": {"type": "array", "items": {"type": "string"}}}}
+        sources = "\n".join(f"[{h['ref']}] {h['title']}: {h['text']}" for h in hits)
+        out = self.model.complete_json(
+            f"You are the {spec['name']} on a transport construction site. Using ONLY the sources, say what must be done about this "
+            "report and what to check before work restarts. Do not decide blame or cost; do not add requirements the sources do not "
+            "state. Cite the sources you use. Write in the language of the report, under 70 words; at most one question.",
+            f"<data>Report: {description}\nSources:\n{sources}</data>", schema)
+        if not out or not str(out.get("claim", "")).strip() or len(out["claim"]) > 500:
+            return None
+        cited = [r for r in out.get("evidence_refs", []) if r in refs]
+        if not cited:
+            return None
+        return {"claim": out["claim"].strip(), "refs": list(dict.fromkeys(cited)),
+                "questions": [q for q in out.get("questions", []) if isinstance(q, str) and q.strip()][:1]}
 
     # --- human gate, dispatch, rectification ------------------------------------------------
     def approve(self, event_id: str, actor: str) -> dict:

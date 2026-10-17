@@ -27,12 +27,19 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, event_id 
 """
 
 
+MIGRATIONS = [("events", "model_risk", "TEXT"), ("findings", "composed_by", "TEXT NOT NULL DEFAULT 'rules'")]
+
+
 class Store:
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = Path(path or os.getenv("INFRAPILOT_DB", "./data/infrapilot.db"))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.tx() as c:
             c.executescript(SCHEMA)
+            # Columns added after the first release; databases created earlier get them here.
+            for table, column, kind in MIGRATIONS:
+                if column not in {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
 
     @contextmanager
     def tx(self):

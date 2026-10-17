@@ -22,6 +22,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
+from app.llm import from_env  # noqa: E402
 from app.service import FieldPilot, GateError, StateError  # noqa: E402
 from app.store import Store  # noqa: E402
 from app.synthetic import photo, reencode  # noqa: E402
@@ -176,8 +177,9 @@ def governance_cases():
     return out
 
 
-def event_cases():
+def event_cases(model=None):
     fp, _ = fresh()
+    fp.model = model
     out = []
     for line in (BASE / "data" / "events.jsonl").read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -188,12 +190,18 @@ def event_cases():
         checks = {"risk": e["final_risk"] == row["risk"], "routing": team[: len(row["team"])] == row["team"],
                   "asset": e["asset_id"] == row["asset"], "stop_work": e["stop_work"] == row["stop"],
                   "grounded": all(f["evidence_refs"] for f in e["findings"] if f["status"] == "SUPPORTED")}
-        out.append({"id": row["id"], "ok": all(checks.values()), "checks": checks, "risk": e["final_risk"], "team": team})
+        out.append({"id": row["id"], "ok": all(checks.values()), "checks": checks, "risk": e["final_risk"], "team": team,
+                    "model_risk": e.get("model_risk"), "composed_by": [f["composed_by"] for f in e["findings"]]})
     return out
 
 
 def main() -> int:
-    events, verification, governance = event_cases(), verification_cases(), governance_cases()
+    # --model: the event suite also uses the configured real model (INFRAPILOT_MODEL_*); verification and governance test the gates.
+    model = from_env() if "--model" in sys.argv else None
+    if "--model" in sys.argv and model is None:
+        print("--model needs INFRAPILOT_MODEL_BASE_URL and INFRAPILOT_MODEL", file=sys.stderr)
+        return 2
+    events, verification, governance = event_cases(model), verification_cases(), governance_cases()
     rate = lambda xs, key=None: round(100 * sum((x["checks"][key] if key else x["ok"]) for x in xs) / len(xs), 1)  # noqa: E731
     metrics = {
         "risk_accuracy": rate(events, "risk"), "routing_accuracy": rate(events, "routing"), "asset_location_accuracy": rate(events, "asset"),
@@ -202,7 +210,13 @@ def main() -> int:
     }
     gates = {k: 100.0 for k in metrics}
     passed = all(metrics[k] >= v for k, v in gates.items())
-    print(json.dumps({"suite": "INFRAPILOT_BENCHMARK", "version": "2.0", "status": "PASSED" if passed else "FAILED",
+    extra = {}
+    if model is not None:
+        extra = {"mode": "model", "model": model.describe(),
+                 "model_raised_risk": sum(1 for e in events if e["model_risk"]),
+                 "model_composed_findings": f"{sum(c == 'model' for e in events for c in e['composed_by'])}/{sum(len(e['composed_by']) for e in events)}",
+                 "all_events": events}
+    print(json.dumps({"suite": "INFRAPILOT_BENCHMARK", "version": "2.0", "status": "PASSED" if passed else "FAILED", **extra,
                       "cases": len(events) + len(verification) + len(governance), "metrics": metrics, "gates": gates,
                       "events": [e for e in events if not e["ok"]], "verification": verification, "governance": governance},
                      ensure_ascii=False, indent=2))
