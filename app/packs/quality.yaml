@@ -1,0 +1,25 @@
+pack: quality
+version: "2026.10"
+sources:
+  - ref: QA-NCR-001
+    title: Non-conformance report / 不符合项
+    domain: quality
+    authority: Synthetic QA/QC Procedure
+    text: >
+      A defect such as a concrete crack requires a non-conformance report (NCR) with location,
+      dimensions, inspection record, engineering disposition and verified corrective action before
+      closure. 混凝土裂缝等缺陷须开具不符合项报告，记录位置、尺寸、检验记录和工程处置意见，纠正措施经验证后方可关闭。
+  - ref: QA-ITP-001
+    title: Inspection and test plan hold points / 检验停止点
+    domain: quality
+    authority: Synthetic QA/QC Procedure
+    text: >
+      Inspection hold points in the inspection and test plan (ITP) must be released by the inspector
+      with recorded evidence before the next activity starts. 检验试验计划中的停止点须由检验员凭记录放行后才能进入下一道工序。
+  - ref: QA-CON-001
+    title: Concrete curing and testing / 混凝土养护与试验
+    domain: quality
+    authority: Synthetic QA/QC Procedure
+    text: >
+      Concrete cube or cylinder strength results below the specified grade trigger an NCR and an
+      engineering review of the affected element. 混凝土试块强度低于设计等级时须开具不符合项并对相关构件进行工程复核。

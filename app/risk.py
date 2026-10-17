@@ -1,25 +1,38 @@
+"""Risk from text signals, fused with the reporter and vision; response and closure SLAs."""
 from __future__ import annotations
-import re
 
-ORDER = ["LOW","MEDIUM","HIGH","CRITICAL"]
+from .text import matched
 
-RULES = [
-    ("CRITICAL", [r"fatal", r"collapse", r"electrocution", r"坍塌", r"触电", r"人员坠落"]),
-    ("HIGH", [r"unprotected edge", r"working at height", r"fall protection", r"guardrail", r"crane", r"lifting", r"deep excavation", r"临边", r"高处作业", r"吊装", r"深基坑"]),
-    ("MEDIUM", [r"crack", r"defect", r"spill", r"blocked access", r"access route blocked", r"裂缝", r"缺陷", r"泄漏", r"通道堵塞"]),
+ORDER = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+RULES: list[tuple[str, list[str]]] = [
+    ("CRITICAL", ["collapse", "collapsed", "fatal", "electrocution", "exposed live", "person fell", "worker fell",
+                  "坍塌", "触电", "死亡", "人员坠落", "带电裸露", "漏电"]),
+    ("HIGH", ["unprotected edge", "open edge", "work at height", "working at height", "no fall protection", "without fall protection",
+              "guardrail missing", "missing guardrail", "no harness", "without harness", "mobile crane", "lifting", "suspended load",
+              "deep excavation", "confined space", "hot work",
+              "临边", "无防护", "高处作业", "未系安全带", "吊装", "深基坑", "受限空间", "动火"]),
+    ("MEDIUM", ["crack", "cracks", "defect", "ncr", "honeycombing", "spalling", "corrosion", "spill", "leak", "blocked access",
+                "access route blocked", "no helmet", "missing ppe",
+                "裂缝", "缺陷", "蜂窝", "剥落", "锈蚀", "泄漏", "通道堵塞", "未戴安全帽"]),
 ]
 
-def assess_text(text: str) -> tuple[str,list[str]]:
-    t=text.lower()
-    hits=[]
-    for risk, patterns in RULES:
-        for p in patterns:
-            if re.search(p,t,re.I):
-                hits.append(p)
-        if hits:
-            return risk,hits
-    return "LOW",[]
+# hours to first response / to verified closure
+SLA_HOURS = {"CRITICAL": (1, 24), "HIGH": (4, 72), "MEDIUM": (24, 168), "LOW": (72, 336)}
 
-def higher(a: str, b: str) -> str:
-    if a == "AUTO": return b
-    return ORDER[max(ORDER.index(a), ORDER.index(b))]
+
+def assess(text: str) -> tuple[str, list[str]]:
+    for level, terms in RULES:
+        hits = matched(text, terms)
+        if hits:
+            return level, hits
+    return "LOW", []
+
+
+def higher(*levels: str) -> str:
+    known = [lv for lv in levels if lv in ORDER]
+    return max(known, key=ORDER.index) if known else "LOW"
+
+
+def stop_work(risk: str, signals: list[str]) -> bool:
+    return risk == "CRITICAL" or (risk == "HIGH" and bool(signals))

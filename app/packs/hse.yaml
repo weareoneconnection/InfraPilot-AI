@@ -1,0 +1,34 @@
+# Synthetic reference knowledge for demonstration and benchmarking only.
+# Not legal advice; real projects must load authority-reviewed sources.
+pack: hse
+version: "2026.10"
+sources:
+  - ref: HSE-WAH-001
+    title: Work at height / 高处作业
+    domain: hse
+    authority: Synthetic HSE Manual
+    text: >
+      Work at height near an unprotected edge requires edge protection (guardrails) or a fall-arrest
+      system with a competent rescue plan before work proceeds. Stop the activity until controls are
+      verified. 临边高处作业必须先设置防护栏杆或使用坠落防护系统并配备救援方案，防护验证前停止作业。
+  - ref: HSE-PTW-001
+    title: Permit to work / 作业许可
+    domain: hse
+    authority: Synthetic HSE Manual
+    text: >
+      High-risk activities including work at height, hot work, confined space and lifting with a crane require a
+      valid permit to work issued for the location and shift. 高处、动火、受限空间和吊装等高风险作业须持有对应地点和班次的有效作业许可证。
+  - ref: HSE-EXC-001
+    title: Deep excavation / 深基坑
+    domain: hse
+    authority: Synthetic HSE Manual
+    text: >
+      Deep excavation requires shoring or battering designed by a competent engineer, daily inspection
+      and barriers at the edge. 深基坑须由合格工程师设计支护或放坡，每日检查并在坑边设置围挡。
+  - ref: HSE-INC-001
+    title: Incident reporting / 事故报告
+    domain: hse
+    authority: Synthetic HSE Manual
+    text: >
+      Any injury, collapse (including formwork or falsework collapse), injured worker or dangerous occurrence must
+      be reported to the HSE manager immediately, the area made safe and the scene preserved for investigation. 发生人员受伤、坍塌或危险事件须立即报告 HSE 经理并保护现场以便调查。

@@ -1,0 +1,24 @@
+pack: site
+version: "2026.10"
+sources:
+  - ref: SITE-ACC-001
+    title: Access routes and emergency egress / 通道与应急疏散
+    domain: construction
+    authority: Synthetic Site Rules
+    text: >
+      Access routes and emergency egress must be kept clear of stored materials; a blocked access route is
+      cleared before the crew proceeds. 施工通道和应急疏散通道不得堆放材料，通道堵塞须清理后方可继续作业。
+  - ref: SITE-HK-001
+    title: Housekeeping / 文明施工
+    domain: construction
+    authority: Synthetic Site Rules
+    text: >
+      Workface housekeeping removes debris, offcuts and trip hazards at the end of each shift.
+      每班结束清理作业面的杂物、边角料和绊倒隐患。
+  - ref: SITE-ELE-001
+    title: Temporary electrical installations / 临时用电
+    domain: hse
+    authority: Synthetic Site Rules
+    text: >
+      Temporary electrical cables must be protected and earth leakage devices tested; exposed live parts
+      are isolated immediately. 临时用电电缆须防护、漏电保护器须测试，裸露带电部位须立即断电隔离。

@@ -1,0 +1,24 @@
+pack: plant
+version: "2026.10"
+sources:
+  - ref: PLT-LIFT-001
+    title: Lifting operations / 吊装作业
+    domain: plant
+    authority: Synthetic Plant Procedure
+    text: >
+      Lifting with a mobile crane requires an approved lift plan, a certified crane and rigging, a
+      competent lifting supervisor and an exclusion zone. 汽车吊吊装须有批准的吊装方案、有效检验合格的起重机和索具、合格指挥人员并设置警戒区。
+  - ref: PLT-CERT-001
+    title: Plant certification / 设备检验
+    domain: plant
+    authority: Synthetic Plant Procedure
+    text: >
+      Plant used in critical operations must hold a valid inspection certificate; expired equipment is
+      tagged out of service. 关键作业设备须持有有效检验证书，过期设备挂牌停用。
+  - ref: BRG-INS-001
+    title: Bridge bearing inspection / 桥梁支座检查
+    domain: asset
+    authority: Synthetic Asset Procedure
+    text: >
+      Bridge bearings are inspected for displacement, cracking and corrosion; a defect above the alert
+      threshold triggers a maintenance task and an engineering assessment. 桥梁支座检查位移、开裂和锈蚀；超过预警阈值的病害触发养护任务和工程评估。

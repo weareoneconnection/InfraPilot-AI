@@ -1,0 +1,18 @@
+{"id":"E01","text":"P47墩临边防护缺失，工人在高处作业未系安全带，下午还要继续施工。","risk":"HIGH","team":["hse"],"asset":"P47","stop":true}
+{"id":"E02","text":"Worker near an unprotected edge at Pier P47 without fall protection","risk":"HIGH","team":["hse"],"asset":"P47","stop":true}
+{"id":"E03","text":"Concrete crack found on Pier P52 after formwork removal","risk":"MEDIUM","team":["quality"],"asset":"P52","stop":false}
+{"id":"E04","text":"P52墩柱混凝土出现裂缝和蜂窝","risk":"MEDIUM","team":["quality"],"asset":"P52","stop":false}
+{"id":"E05","text":"Mobile crane lifting at Station S12 tomorrow; the crane certificate expired last week","risk":"HIGH","team":["plant","hse"],"asset":"S12","stop":true}
+{"id":"E06","text":"S12车站明天汽车吊吊装钢梁，起重机检验证书过期","risk":"HIGH","team":["plant","hse"],"asset":"S12","stop":true}
+{"id":"E07","text":"S07车站深基坑开挖，支护出现变形","risk":"HIGH","team":["hse"],"asset":"S07","stop":true}
+{"id":"E08","text":"Formwork collapse at Pier P61, one worker injured","risk":"CRITICAL","team":["hse"],"asset":"P61","stop":true}
+{"id":"E09","text":"P61墩旁临时配电箱漏电，电缆带电裸露","risk":"CRITICAL","team":["hse"],"asset":"P61","stop":true}
+{"id":"E10","text":"Access route blocked by stored materials at Station S07; crew cannot proceed","risk":"MEDIUM","team":["construction"],"asset":"S07","stop":false}
+{"id":"E11","text":"S12车站施工通道堵塞，材料堆放在疏散通道","risk":"MEDIUM","team":["construction"],"asset":"S12","stop":false}
+{"id":"E12","text":"Housekeeping: debris and offcuts left at the workface near P52","risk":"LOW","team":["construction"],"asset":"P52","stop":false}
+{"id":"E13","text":"Bearing corrosion observed during inspection at BRG-03","risk":"MEDIUM","team":["quality"],"asset":"BRG-03","stop":false}
+{"id":"E14","text":"Concrete cube strength results below the specified grade for the P61 pour","risk":"LOW","team":["quality"],"asset":"P61","stop":false}
+{"id":"E15","text":"Hot work without a permit to work near Station S07","risk":"HIGH","team":["hse"],"asset":"S07","stop":true}
+{"id":"E16","text":"I have no knowledge of the ledge pledge; just a general note","risk":"LOW","team":["construction"],"asset":null,"stop":false}
+{"id":"E17","text":"Pledge to acknowledge the edgeless design review","risk":"LOW","team":["construction"],"asset":null,"stop":false}
+{"id":"E18","text":"会议改到周五下午","risk":"LOW","team":["construction"],"asset":null,"stop":false}

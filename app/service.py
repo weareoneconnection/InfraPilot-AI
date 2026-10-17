@@ -1,168 +1,385 @@
+"""Field event lifecycle: sense → assess → plan → human gate → dispatch → rectify → re-inspect → verify → close → learn.
+
+* **Sense.** Text, photos (signature-checked, SHA-256, perceptual hash, EXIF
+  time and GPS), an asset id, a QR payload or GPS position locate the event on
+  a registered asset.
+* **Assess.** Risk is the highest of the reporter, the text signals and the
+  (optional, taxonomy-validated) vision model -- never lowered. The risk sets
+  the response and closure SLAs and whether work must stop.
+* **Plan.** Specialists are routed by the governed evidence the event
+  retrieves; each finding cites real sources or reports a gap.
+* **Human gate.** Only a named human approves; dispatch creates owned tasks
+  due within the SLA.
+* **Verify.** Closure needs an independent re-inspection whose after-photo
+  is new (different hash and perceptual hash from every before-photo), taken
+  after dispatch, at the asset (within its geofence, or attested), by someone
+  who did not do the work, with every task done.
+* **Learn.** Closed events become precedents for the same asset or hazard.
+"""
 from __future__ import annotations
-import hashlib, json, mimetypes, re, uuid
-from datetime import datetime, timezone
-from .db import tx, connect
-from .risk import assess_text, higher
-from .agents import assemble, SOURCE_TEXT
-from .llm import vision_assess
 
-NOW=lambda: datetime.now(timezone.utc).isoformat()
+import hashlib
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Callable
 
-def jid(prefix:str)->str: return f"{prefix}-{uuid.uuid4().hex[:10].upper()}"
+from .knowledge import KnowledgeIndex, load_packs
+from .llm import Model
+from .perception import HAZARD_TAXONOMY, dhash, distance_m, exif_facts, hamming, sniff, vision_hazards
+from .risk import SLA_HOURS, assess, higher, stop_work
+from .store import Store
 
-def rowdict(row): return dict(row) if row is not None else None
+PACKS = Path(__file__).resolve().parent / "packs"
+ASSETS = Path(__file__).resolve().parent.parent / "data" / "assets.json"
+REUSE_DISTANCE = 10  # of 512 dHash bits: at or below this the "after" photo is the same picture re-saved
+HUMAN_FORBIDDEN = ("agent:", "model:", "system", "policy:", "auto")
+MAX_MEDIA = 25 * 1024 * 1024
 
-def _json(v): return json.dumps(v, ensure_ascii=False, sort_keys=True)
+SPECIALISTS = {
+    "hse": {"name": "HSE 智能体", "domain": "hse", "owner": "HSE Manager / HSE 经理",
+            "action": "Stop the unsafe activity, isolate the area and install the required controls before restart / 停止不安全作业、隔离并落实管控后复工"},
+    "quality": {"name": "质量智能体", "domain": "quality", "also": ["asset"], "owner": "QA/QC Manager / 质量经理",
+                "action": "Raise an NCR, record location and dimensions, and obtain engineering disposition / 开具不符合项、记录位置尺寸并取得工程处置意见"},
+    "plant": {"name": "设备吊装智能体", "domain": "plant", "owner": "Plant Manager / 设备经理",
+              "action": "Hold the lift until the lift plan and equipment certificates are verified / 吊装方案和设备证书核实前暂停吊装"},
+    "construction": {"name": "施工智能体", "domain": "construction", "owner": "Construction Manager / 施工经理",
+                     "action": "Re-sequence the workface and brief the crew on the corrective measure / 调整作业面安排并向班组交底整改措施"},
+}
 
-def audit(conn,event_id,actor,action,detail):
-    conn.execute("INSERT INTO audit_events(event_id,actor,action,detail,created_at) VALUES(?,?,?,?,?)",(event_id,actor,action,_json(detail),NOW()))
 
-def sniff(content:bytes)->str|None:
-    h=content[:16]
-    if h.startswith(b'\xff\xd8\xff'): return 'image/jpeg'
-    if h.startswith(b'\x89PNG\r\n\x1a\n'): return 'image/png'
-    if h[:4]==b'RIFF' and h[8:12]==b'WEBP': return 'image/webp'
-    if h[:4]==b'RIFF' and h[8:12]==b'WAVE': return 'audio/wav'
-    if h[4:8]==b'ftyp': return 'video/mp4'
-    if h.startswith(b'ID3') or h[:2] in (b'\xff\xfb',b'\xff\xf3',b'\xff\xf2'): return 'audio/mpeg'
-    return None
+class GateError(PermissionError):
+    pass
 
-def store_media(content:bytes, declared:str|None=None)->dict:
-    media_type=sniff(content)
-    if media_type is None: raise ValueError('unsupported media signature')
-    sha=hashlib.sha256(content).hexdigest()
-    with tx() as conn:
-        conn.execute("INSERT OR IGNORE INTO media(sha256,media_type,size,content,created_at) VALUES(?,?,?,?,?)",(sha,media_type,len(content),content,NOW()))
-    return {"sha256":sha,"media_type":media_type,"size":len(content)}
 
-async def create_event(payload:dict)->dict:
-    project_id=int(payload.get('project_id',1)); media_sha=payload.get('media_sha')
-    description=payload['description'].strip(); reported=payload.get('reported_risk','AUTO')
-    ai_risk,hits=assess_text(description); perception_method='rules'
-    if media_sha:
-        with connect() as c: m=c.execute("SELECT * FROM media WHERE sha256=?",(media_sha,)).fetchone()
-        if not m: raise ValueError('media not found')
-        v=await vision_assess(bytes(m['content']),m['media_type'],description)
-        if v and v.get('risk') in {"LOW","MEDIUM","HIGH","CRITICAL"}:
-            ai_risk=higher(ai_risk,v['risk']); perception_method='vision_model'
-    final=higher(reported,ai_risk)
-    event_id=jid('EVT'); now=NOW()
-    with tx() as conn:
-        if not conn.execute("SELECT 1 FROM projects WHERE id=?",(project_id,)).fetchone(): raise ValueError('project not found')
-        conn.execute("INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(
-            event_id,project_id,'field',description,payload.get('event_type','observation'),reported,ai_risk,final,payload.get('asset_ref'),payload.get('lat'),payload.get('lon'),'NEW',perception_method,now,now))
-        if media_sha: conn.execute("INSERT INTO event_media(event_id,media_sha,role) VALUES(?,?,?)",(event_id,media_sha,'before'))
-        audit(conn,event_id,'reporter','event.created',{"risk_rules":hits,"perception_method":perception_method})
-    return get_event(event_id)
+class StateError(RuntimeError):
+    pass
 
-def get_event(event_id:str)->dict:
-    with connect() as conn:
-        e=conn.execute("SELECT * FROM events WHERE id=?",(event_id,)).fetchone()
-        if not e: raise KeyError(event_id)
-        out=rowdict(e)
-        for key in ('findings','actions','receipts','inspections'):
-            table={'findings':'findings','actions':'actions','receipts':'receipts','inspections':'inspections'}[key]
-            rows=[rowdict(r) for r in conn.execute(f"SELECT * FROM {table} WHERE event_id=? ORDER BY rowid",(event_id,)).fetchall()]
-            for r in rows:
-                for fld in ('evidence_refs','actions','questions','payload'):
-                    if fld in r and isinstance(r[fld],str):
-                        try:r[fld]=json.loads(r[fld])
-                        except:pass
-            out[key]=rows
-        d=conn.execute("SELECT * FROM decisions WHERE event_id=? ORDER BY created_at DESC LIMIT 1",(event_id,)).fetchone()
-        out['decision']=rowdict(d)
-        if out['decision']:
-            out['decision']['plan']=json.loads(out['decision']['plan'])
-        out['media']=[dict(r) for r in conn.execute("SELECT em.role,m.sha256,m.media_type,m.size FROM event_media em JOIN media m ON m.sha256=em.media_sha WHERE em.event_id=?",(event_id,)).fetchall()]
-        return out
 
-def analyze(event_id:str)->dict:
-    with tx() as conn:
-        e=conn.execute("SELECT * FROM events WHERE id=?",(event_id,)).fetchone()
-        if not e: raise KeyError(event_id)
-        conn.execute("DELETE FROM findings WHERE event_id=?",(event_id,))
-        team=assemble(e['description'],e['final_risk'])
-        findings=[]; plan=[]
-        for a in team:
-            refs=list(a.evidence[:1])
-            claim=f"{a.name}: {a.focus} requires review for this event."
-            actions=[a.action]
-            questions=[]
-            if a.id in {'engineering','quality'} and not e['asset_ref']:
-                questions=["Confirm the affected asset/component reference."]
-            conn.execute("INSERT INTO findings(event_id,agent_id,claim,status,evidence_refs,confidence,actions,questions,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                (event_id,a.id,claim,'SUPPORTED',_json(refs),0.86,_json(actions),_json(questions),NOW()))
-            findings.append({"agent_id":a.id,"agent":a.name,"claim":claim,"status":"SUPPORTED","evidence_refs":refs,"confidence":0.86,"actions":actions,"questions":questions})
-            plan.append({"title":a.action,"owner":a.owner,"source":f"finding:{a.id}","evidence_refs":refs})
-        # deduplicate exact actions
-        uniq=[]; seen=set()
-        for p in plan:
-            if p['title'] not in seen: uniq.append(p); seen.add(p['title'])
-        decision_id=jid('DEC')
-        conn.execute("INSERT INTO decisions VALUES(?,?,?,?,?)",(decision_id,event_id,_json(uniq),'AWAITING_APPROVAL',NOW()))
-        conn.execute("DELETE FROM actions WHERE event_id=?",(event_id,))
-        for p in uniq:
-            conn.execute("INSERT INTO actions VALUES(?,?,?,?,?,?,?,?,?,?)",(jid('ACT'),event_id,p['title'],p['owner'],'AWAITING_APPROVAL',1,None,NOW(),None,None))
-        conn.execute("UPDATE events SET status='AWAITING_APPROVAL',updated_at=? WHERE id=?",(NOW(),event_id))
-        audit(conn,event_id,'system','analysis.completed',{"team":[a.id for a in team],"findings":len(findings),"plan_steps":len(uniq)})
-    return get_event(event_id)
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat()
 
-def approve(event_id:str,actor:str)->dict:
-    with tx() as conn:
-        e=conn.execute("SELECT * FROM events WHERE id=?",(event_id,)).fetchone()
-        if not e: raise KeyError(event_id)
-        if e['status']!='AWAITING_APPROVAL': raise ValueError('event is not awaiting approval')
-        conn.execute("UPDATE actions SET status='APPROVED',approved_by=? WHERE event_id=?",(actor,event_id))
-        conn.execute("UPDATE decisions SET status='APPROVED' WHERE event_id=?",(event_id,))
-        conn.execute("UPDATE events SET status='APPROVED',updated_at=? WHERE id=?",(NOW(),event_id))
-        audit(conn,event_id,actor,'decision.approved',{})
-    return get_event(event_id)
 
-def dispatch(event_id:str,actor:str)->dict:
-    with tx() as conn:
-        e=conn.execute("SELECT * FROM events WHERE id=?",(event_id,)).fetchone()
-        if not e: raise KeyError(event_id)
-        if e['status']!='APPROVED': raise ValueError('human approval required')
-        rows=conn.execute("SELECT * FROM actions WHERE event_id=?",(event_id,)).fetchall()
-        for a in rows:
-            payload={"action_id":a['id'],"title":a['title'],"owner":a['owner'],"delivery_status":"DISPATCHED_TO_DEMO_QUEUE","external_side_effect":False}
-            digest=hashlib.sha256(_json(payload).encode()).hexdigest()
-            conn.execute("UPDATE actions SET status='DISPATCHED',dispatched_at=?,executed_at=? WHERE id=?",(NOW(),NOW(),a['id']))
-            conn.execute("INSERT INTO receipts VALUES(?,?,?,?,?,?,?,?)",(jid('RCP'),event_id,a['id'],'execution','SUCCEEDED',digest,_json(payload),NOW()))
-        conn.execute("UPDATE events SET status='EXECUTED',updated_at=? WHERE id=?",(NOW(),event_id))
-        audit(conn,event_id,actor,'actions.dispatched',{"count":len(rows),"external_side_effect":False})
-    return get_event(event_id)
+def _parse(ts: str) -> datetime:
+    dt = datetime.fromisoformat(ts)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
-def reinspect(event_id:str,observation:str,resolved:bool,media_sha:str|None,actor:str)->dict:
-    with tx() as conn:
-        e=conn.execute("SELECT * FROM events WHERE id=?",(event_id,)).fetchone()
-        if not e: raise KeyError(event_id)
-        if e['status']!='EXECUTED': raise ValueError('execute approved actions before re-inspection')
-        if media_sha and not conn.execute("SELECT 1 FROM media WHERE sha256=?",(media_sha,)).fetchone(): raise ValueError('media not found')
-        iid=jid('INSP')
-        conn.execute("INSERT INTO inspections VALUES(?,?,?,?,?,?)",(iid,event_id,observation,media_sha,1 if resolved else 0,NOW()))
-        if media_sha: conn.execute("INSERT OR IGNORE INTO event_media(event_id,media_sha,role) VALUES(?,?,?)",(event_id,media_sha,'after'))
-        checks={"human_reinspection":True,"resolution_asserted":resolved,"execution_receipt":bool(conn.execute("SELECT 1 FROM receipts WHERE event_id=? AND kind='execution' AND status='SUCCEEDED'",(event_id,)).fetchone()),"after_evidence":bool(media_sha or observation)}
-        passed=all(checks.values())
-        payload={"inspection_id":iid,"checks":checks,"passed":passed,"actor":actor}
-        digest=hashlib.sha256(_json(payload).encode()).hexdigest()
-        conn.execute("INSERT INTO receipts VALUES(?,?,?,?,?,?,?,?)",(jid('RCP'),event_id,None,'verification','PASSED' if passed else 'FAILED',digest,_json(payload),NOW()))
-        conn.execute("UPDATE events SET status=?,updated_at=? WHERE id=?",('VERIFIED' if passed else 'VERIFICATION_FAILED',NOW(),event_id))
-        audit(conn,event_id,actor,'reinspection.verified',payload)
-    return get_event(event_id)
 
-def close(event_id:str,actor:str='project_manager')->dict:
-    with tx() as conn:
-        e=conn.execute("SELECT * FROM events WHERE id=?",(event_id,)).fetchone()
-        if not e: raise KeyError(event_id)
-        if e['status']!='VERIFIED': raise ValueError('verification must pass before close')
-        conn.execute("UPDATE events SET status='CLOSED',updated_at=? WHERE id=?",(NOW(),event_id))
-        audit(conn,event_id,actor,'event.closed',{})
-    return get_event(event_id)
+def _human(actor: str) -> str:
+    actor = (actor or "").strip()
+    if len(actor) < 2 or actor.lower().startswith(HUMAN_FORBIDDEN):
+        raise GateError("this step needs a named human, not an agent, model or automation")
+    return actor
 
-def dashboard()->dict:
-    with connect() as conn:
-        counts={r['status']:r['n'] for r in conn.execute("SELECT status,COUNT(*) n FROM events GROUP BY status")}
-        risks={r['final_risk']:r['n'] for r in conn.execute("SELECT final_risk,COUNT(*) n FROM events GROUP BY final_risk")}
-        recent=[dict(r) for r in conn.execute("SELECT id,description,final_risk,status,created_at FROM events ORDER BY created_at DESC LIMIT 10")]
-        return {"events_by_status":counts,"events_by_risk":risks,"recent":recent}
+
+def _digest(value) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+
+
+class FieldPilot:
+    def __init__(self, store: Store | None = None, model: Model | None = None, clock: Callable[[], datetime] | None = None,
+                 assets_path: Path = ASSETS) -> None:
+        self.store = store or Store()
+        self.model = model
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        registry = json.loads(Path(assets_path).read_text(encoding="utf-8"))
+        self.project = registry["project"]["code"]
+        self.assets = {a["id"]: a for a in registry["assets"]}
+        self.index = KnowledgeIndex(load_packs(PACKS))
+
+    def now(self) -> str:
+        return _iso(self.clock())
+
+    def _audit(self, c, event_id, actor, action, detail) -> None:
+        c.execute("INSERT INTO audit(event_id,actor,action,detail,created_at) VALUES(?,?,?,?,?)",
+                  (event_id, actor, action, json.dumps(detail, ensure_ascii=False, default=str), self.now()))
+
+    # --- sense -----------------------------------------------------------------------
+    def store_media(self, content: bytes) -> dict:
+        if len(content) > MAX_MEDIA:
+            raise ValueError("file too large")
+        media_type = sniff(content)
+        if media_type is None:
+            raise ValueError("unsupported file signature (JPEG, PNG, WebP, WAV or MP4)")
+        sha = hashlib.sha256(content).hexdigest()
+        facts = exif_facts(content) if media_type.startswith("image/") else {}
+        ph = dhash(content) if media_type.startswith("image/") else None
+        with self.store.tx() as c:
+            c.execute("INSERT OR IGNORE INTO media(sha256,media_type,size,dhash,captured_at,lat,lon,content,received_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                      (sha, media_type, len(content), ph, facts.get("captured_at"), facts.get("lat"), facts.get("lon"), content, self.now()))
+        return self.media(sha)
+
+    def media(self, sha: str, with_content: bool = False) -> dict:
+        cols = "*" if with_content else "sha256,media_type,size,dhash,captured_at,lat,lon,received_at"
+        row = self.store.one(f"SELECT {cols} FROM media WHERE sha256=?", (sha,))
+        if not row:
+            raise KeyError(sha)
+        return row
+
+    def locate(self, text: str, asset_id: str | None, qr: str | None, lat: float | None, lon: float | None,
+               photo: dict | None) -> tuple[str | None, str]:
+        if asset_id:
+            if asset_id not in self.assets:
+                raise ValueError(f"unknown asset {asset_id}")
+            return asset_id, "selected"
+        if qr and qr.lower().startswith("asset:") and qr[6:].strip().upper() in self.assets:
+            return qr[6:].strip().upper(), "qr"
+        upper = text.upper()
+        for aid in sorted(self.assets, key=len, reverse=True):
+            if aid in upper:
+                return aid, "text"
+        point = (lat, lon) if lat is not None and lon is not None else ((photo["lat"], photo["lon"]) if photo and photo.get("lat") is not None else None)
+        if point:
+            nearest = min(self.assets.values(), key=lambda a: distance_m(point[0], point[1], a["lat"], a["lon"]))
+            if distance_m(point[0], point[1], nearest["lat"], nearest["lon"]) <= nearest["geofence_m"]:
+                return nearest["id"], "gps" if lat is not None else "photo_gps"
+        return None, "unlocated"
+
+    # --- assess + plan ----------------------------------------------------------------
+    def report(self, *, description: str, reporter: str, reported_risk: str = "AUTO", asset_id: str | None = None, qr: str | None = None,
+               lat: float | None = None, lon: float | None = None, photos: list[str] | None = None) -> dict:
+        reporter = (reporter or "").strip() or "field user"
+        photos = photos or []
+        media = [self.media(s) for s in photos]
+        asset, method = self.locate(description, asset_id, qr, lat, lon, next((m for m in media if m.get("lat") is not None), None))
+        text_risk, signals = assess(description)
+        vision_risk, vision_labels = None, []
+        for m in media:
+            v = vision_hazards(self.model, self.media(m["sha256"], True)["content"], m["media_type"], description)
+            if v and v["hazards"]:
+                vision_labels += [h["label"] for h in v["hazards"]]
+                vision_risk = higher(vision_risk or "LOW", *(HAZARD_TAXONOMY[h["label"]] for h in v["hazards"]))
+        final = higher(reported_risk, text_risk, vision_risk or "LOW")
+        respond, close = SLA_HOURS[final]
+        created = self.clock()
+        eid = "EVT-" + uuid.uuid4().hex[:10].upper()
+        signals_all = signals + [f"vision:{v}" for v in vision_labels]
+        with self.store.tx() as c:
+            c.execute("INSERT INTO events(id,project,description,asset_id,asset_method,reported_risk,text_risk,vision_risk,final_risk,signals,"
+                      "stop_work,status,reporter,lat,lon,response_due,close_due,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (eid, self.project, description, asset, method, reported_risk, text_risk, vision_risk, final, json.dumps(signals_all, ensure_ascii=False),
+                       int(stop_work(final, signals)), "REPORTED", reporter, lat, lon, _iso(created + timedelta(hours=respond)),
+                       _iso(created + timedelta(hours=close)), _iso(created), _iso(created)))
+            for s in photos:
+                c.execute("INSERT OR IGNORE INTO event_media VALUES(?,?,?,?,?)", (eid, s, "before", reporter, self.now()))
+            self._audit(c, eid, reporter, "event.reported", {"risk": final, "signals": signals_all, "asset": asset, "located_by": method})
+        return self.analyse(eid)
+
+    def _domains(self, sid: str) -> set[str]:
+        spec = SPECIALISTS[sid]
+        return {spec["domain"], *spec.get("also", [])}
+
+    def route(self, text: str, risk: str) -> tuple[list[str], list[dict]]:
+        """Specialists whose domain the governed evidence points to; HSE joins any HIGH/CRITICAL event."""
+        hits = self.index.search(text, top_k=10)
+        best: dict[str, float] = {}
+        for sid in SPECIALISTS:
+            scores = [h["score"] for h in hits if h["domain"] in self._domains(sid)]
+            if scores:
+                best[sid] = max(scores)
+        top = max(best.values(), default=0.0)
+        team = sorted((sid for sid, score in best.items() if score >= 0.6 * top), key=lambda sid: -best[sid])
+        if risk in {"HIGH", "CRITICAL"} and "hse" not in team:
+            team.append("hse")
+        return (team or ["construction"])[:3], hits
+
+    def analyse(self, event_id: str) -> dict:
+        ev = self._event_row(event_id)
+        if ev["status"] not in {"REPORTED", "ASSESSED"}:
+            raise StateError(f"event is {ev['status']}; analysis is frozen after approval")
+        team, hits = self.route(ev["description"], ev["final_risk"])
+        due = _iso(_parse(ev["created_at"]) + timedelta(hours=SLA_HOURS[ev["final_risk"]][1]))
+        with self.store.tx() as c:
+            c.execute("DELETE FROM findings WHERE event_id=?", (event_id,))
+            c.execute("DELETE FROM tasks WHERE event_id=? AND status='PROPOSED'", (event_id,))
+            for sid in team:
+                spec = SPECIALISTS[sid]
+                own = [h for h in hits if h["domain"] in self._domains(sid)][:3]
+                if own:
+                    top = own[0]
+                    confidence = round(min(0.95, 0.55 + 0.04 * top["score"]), 2)
+                    claim = f"{spec['name']}：{top['title']}（{top['ref']}）— {top['text'][:160]}"
+                    c.execute("INSERT INTO findings(event_id,agent_id,status,claim,evidence_refs,confidence,questions) VALUES(?,?,?,?,?,?,?)",
+                              (event_id, sid, "SUPPORTED", claim, json.dumps([h["ref"] for h in own]), confidence, "[]"))
+                    c.execute("INSERT INTO tasks(id,event_id,title,owner_role,source,evidence_refs,status,due_at) VALUES(?,?,?,?,?,?,?,?)",
+                              ("TSK-" + uuid.uuid4().hex[:8].upper(), event_id, spec["action"], spec["owner"], f"finding:{sid}",
+                               json.dumps([h["ref"] for h in own]), "PROPOSED", due))
+                else:
+                    c.execute("INSERT INTO findings(event_id,agent_id,status,claim,evidence_refs,confidence,questions) VALUES(?,?,?,?,?,?,?)",
+                              (event_id, sid, "GAP", f"{spec['name']}：没有找到适用的受控依据 / no governed source found", "[]", 0.3,
+                               json.dumps(["请补充适用的规程、方案或记录 / Which procedure or record governs this?"], ensure_ascii=False)))
+            c.execute("UPDATE events SET status='ASSESSED', updated_at=? WHERE id=?", (self.now(), event_id))
+            self._audit(c, event_id, "system", "event.assessed", {"team": team})
+        return self.event(event_id)
+
+    # --- human gate, dispatch, rectification ------------------------------------------------
+    def approve(self, event_id: str, actor: str) -> dict:
+        actor = _human(actor)
+        with self.store.tx() as c:
+            cur = c.execute("UPDATE events SET status='APPROVED', updated_at=? WHERE id=? AND status='ASSESSED'", (self.now(), event_id))
+            if cur.rowcount != 1:
+                raise StateError("only an assessed event can be approved")
+            if not c.execute("SELECT 1 FROM tasks WHERE event_id=? AND status='PROPOSED'", (event_id,)).fetchone():
+                raise StateError("no evidence-backed task to approve; answer the agents' questions first")
+            c.execute("UPDATE tasks SET status='APPROVED' WHERE event_id=? AND status='PROPOSED'", (event_id,))
+            self._audit(c, event_id, actor, "plan.approved", {})
+            self._receipt(c, event_id, "approval", "APPROVED", {"approved_by": actor})
+        return self.event(event_id)
+
+    def dispatch(self, event_id: str, actor: str) -> dict:
+        actor = _human(actor)
+        with self.store.tx() as c:
+            cur = c.execute("UPDATE events SET status='DISPATCHED', updated_at=? WHERE id=? AND status='APPROVED'", (self.now(), event_id))
+            if cur.rowcount != 1:
+                raise GateError("human approval is required before dispatch")
+            c.execute("UPDATE tasks SET status='DISPATCHED' WHERE event_id=? AND status='APPROVED'", (event_id,))
+            tasks = [dict(r) for r in c.execute("SELECT id,title,owner_role,due_at FROM tasks WHERE event_id=?", (event_id,))]
+            self._receipt(c, event_id, "dispatch", "DISPATCHED", {"dispatched_by": actor, "tasks": tasks, "external_side_effect": False})
+            self._audit(c, event_id, actor, "tasks.dispatched", {"count": len(tasks)})
+        return self.event(event_id)
+
+    def complete_task(self, task_id: str, actor: str, note: str) -> dict:
+        actor = _human(actor)
+        task = self.store.one("SELECT * FROM tasks WHERE id=?", (task_id,))
+        if not task:
+            raise KeyError(task_id)
+        with self.store.tx() as c:
+            cur = c.execute("UPDATE tasks SET status='DONE', done_by=?, done_at=?, note=? WHERE id=? AND status='DISPATCHED'",
+                            (actor, self.now(), note, task_id))
+            if cur.rowcount != 1:
+                raise StateError("only a dispatched task can be completed")
+            self._audit(c, task["event_id"], actor, "task.done", {"task": task_id, "note": note})
+        return self.event(task["event_id"])
+
+    # --- re-inspection and verification ------------------------------------------------------
+    def reinspect(self, event_id: str, *, inspector: str, observation: str, resolved: bool, photos: list[str],
+                  attest_location: bool = False) -> dict:
+        inspector = _human(inspector)
+        ev = self._event_row(event_id)
+        if ev["status"] not in {"DISPATCHED", "VERIFICATION_FAILED"}:
+            raise StateError("re-inspection follows dispatch")
+        after = [self.media(s) for s in photos]
+        before = [self.media(r["sha256"]) for r in self.store.rows("SELECT sha256 FROM event_media WHERE event_id=? AND role='before'", (event_id,))]
+        tasks = self.store.rows("SELECT * FROM tasks WHERE event_id=?", (event_id,))
+        dispatch = self.store.one("SELECT created_at FROM receipts WHERE event_id=? AND kind='dispatch'", (event_id,))
+        dispatched_at = _parse(dispatch["created_at"]) if dispatch else None
+        asset = self.assets.get(ev["asset_id"] or "")
+        images = [m for m in after if m["media_type"].startswith("image/")]
+
+        def taken(m):
+            return _parse(m["captured_at"]) if m.get("captured_at") else _parse(m["received_at"])
+
+        reused = [m["sha256"][:12] for m in images for b in before
+                  if m["sha256"] == b["sha256"] or (m["dhash"] and b.get("dhash") and hamming(m["dhash"], b["dhash"]) <= REUSE_DISTANCE)]
+        located = [m for m in images if m.get("lat") is not None]
+        at_asset = bool(asset) and bool(located) and all(distance_m(m["lat"], m["lon"], asset["lat"], asset["lon"]) <= asset["geofence_m"] for m in located)
+        executors = {t["done_by"] for t in tasks if t["done_by"]}
+        hazard_cleared = resolved
+        if self.model is not None:
+            for m in images:
+                v = vision_hazards(self.model, self.media(m["sha256"], True)["content"], m["media_type"], observation)
+                if v and v["hazards"]:
+                    hazard_cleared = False
+        checks = {
+            "all_tasks_done": bool(tasks) and all(t["status"] == "DONE" for t in tasks),
+            "after_photo_present": bool(images),
+            "after_photo_is_new": bool(images) and not reused,
+            "after_photo_after_dispatch": bool(images) and dispatched_at is not None and all(taken(m) >= dispatched_at for m in images),
+            "after_photo_at_asset": at_asset or (attest_location and bool(asset)),
+            "inspector_independent": inspector not in executors and inspector != ev["reporter"],
+            "hazard_cleared": hazard_cleared,
+        }
+        passed = all(checks.values())
+        payload = {"inspector": inspector, "observation": observation, "checks": checks, "passed": passed,
+                   "location_basis": "photo_gps" if at_asset else ("inspector_attestation" if attest_location else "none"),
+                   "reused_photos": reused, "after_photos": [m["sha256"] for m in after]}
+        with self.store.tx() as c:
+            for s in photos:
+                c.execute("INSERT OR IGNORE INTO event_media VALUES(?,?,?,?,?)", (event_id, s, "after", inspector, self.now()))
+            self._receipt(c, event_id, "verification", "PASSED" if passed else "FAILED", payload)
+            c.execute("UPDATE events SET status=?, updated_at=? WHERE id=?", ("VERIFIED" if passed else "VERIFICATION_FAILED", self.now(), event_id))
+            self._audit(c, event_id, inspector, "reinspection.verified" if passed else "reinspection.failed", checks)
+        return self.event(event_id)
+
+    def close(self, event_id: str, actor: str) -> dict:
+        actor = _human(actor)
+        with self.store.tx() as c:
+            cur = c.execute("UPDATE events SET status='CLOSED', closed_at=?, updated_at=? WHERE id=? AND status='VERIFIED'",
+                            (self.now(), self.now(), event_id))
+            if cur.rowcount != 1:
+                raise GateError("an event closes only after a passed independent re-inspection")
+            self._audit(c, event_id, actor, "event.closed", {})
+        return self.event(event_id)
+
+    def _receipt(self, c, event_id: str, kind: str, status: str, payload: dict) -> None:
+        c.execute("INSERT INTO receipts VALUES(?,?,?,?,?,?,?)", ("RCP-" + uuid.uuid4().hex[:10].upper(), event_id, kind, status,
+                                                                 _digest(payload), json.dumps(payload, ensure_ascii=False), self.now()))
+
+    # --- read models -----------------------------------------------------------------------
+    def _event_row(self, event_id: str) -> dict:
+        ev = self.store.one("SELECT * FROM events WHERE id=?", (event_id,))
+        if not ev:
+            raise KeyError(event_id)
+        return ev
+
+    def event(self, event_id: str) -> dict:
+        ev = self._event_row(event_id)
+        ev["signals"] = json.loads(ev["signals"])
+        ev["stop_work"] = bool(ev["stop_work"])
+        ev["asset"] = self.assets.get(ev["asset_id"] or "")
+        ev["findings"] = [{**f, "evidence_refs": json.loads(f["evidence_refs"]), "questions": json.loads(f["questions"])}
+                          for f in self.store.rows("SELECT * FROM findings WHERE event_id=? ORDER BY id", (event_id,))]
+        ev["tasks"] = [{**t, "evidence_refs": json.loads(t["evidence_refs"])} for t in self.store.rows("SELECT * FROM tasks WHERE event_id=? ORDER BY id", (event_id,))]
+        ev["media"] = [{**self.media(r["sha256"]), "role": r["role"]} for r in self.store.rows("SELECT * FROM event_media WHERE event_id=? ORDER BY added_at", (event_id,))]
+        ev["receipts"] = [{**r, "payload": json.loads(r["payload"])} for r in self.store.rows("SELECT * FROM receipts WHERE event_id=? ORDER BY created_at", (event_id,))]
+        ev["audit"] = self.store.rows("SELECT actor,action,detail,created_at FROM audit WHERE event_id=? ORDER BY id", (event_id,))
+        now = self.clock()
+        ev["sla"] = {"response_overdue": ev["status"] in {"REPORTED", "ASSESSED"} and now > _parse(ev["response_due"]),
+                     "close_overdue": ev["status"] != "CLOSED" and now > _parse(ev["close_due"])}
+        ev["precedents"] = self.precedents(ev)
+        return ev
+
+    def precedents(self, ev: dict) -> list[dict]:
+        """Closed events on the same asset or with a shared signal: what was done and how long it took."""
+        out = []
+        signals = set(json.loads(ev["signals"]) if isinstance(ev["signals"], str) else ev["signals"])
+        for p in self.store.rows("SELECT * FROM events WHERE status='CLOSED' AND id!=? ORDER BY closed_at DESC LIMIT 50", (ev["id"],)):
+            shared = signals & set(json.loads(p["signals"]))
+            if p["asset_id"] == ev["asset_id"] and ev["asset_id"] or shared:
+                hours = (_parse(p["closed_at"]) - _parse(p["created_at"])).total_seconds() / 3600
+                tasks = [t["title"] for t in self.store.rows("SELECT title FROM tasks WHERE event_id=?", (p["id"],))]
+                out.append({"id": p["id"], "asset_id": p["asset_id"], "risk": p["final_risk"], "shared_signals": sorted(shared),
+                            "hours_to_close": round(hours, 1), "actions": tasks, "description": p["description"][:120]})
+        return out[:5]
+
+    def board(self, limit: int = 50) -> list[dict]:
+        now = self.clock()
+        rows = self.store.rows("SELECT id,description,asset_id,final_risk,status,stop_work,response_due,close_due,created_at FROM events ORDER BY created_at DESC LIMIT ?", (limit,))
+        for r in rows:
+            r["close_overdue"] = r["status"] != "CLOSED" and now > _parse(r["close_due"])
+        return rows
+
+    def dashboard(self) -> dict:
+        events = self.store.rows("SELECT * FROM events")
+        closed = [e for e in events if e["status"] == "CLOSED"]
+        verifications = self.store.rows("SELECT event_id,status,created_at FROM receipts WHERE kind='verification' ORDER BY created_at")
+        first = {}
+        for v in verifications:
+            first.setdefault(v["event_id"], v["status"])
+        hotspots: dict[str, int] = {}
+        for e in events:
+            if e["asset_id"]:
+                hotspots[e["asset_id"]] = hotspots.get(e["asset_id"], 0) + 1
+        now = self.clock()
+        return {
+            "events": len(events),
+            "by_status": {s: sum(e["status"] == s for e in events) for s in sorted({e["status"] for e in events})},
+            "by_risk": {r: sum(e["final_risk"] == r for e in events) for r in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]},
+            "stop_work_active": sum(e["stop_work"] and e["status"] != "CLOSED" for e in events),
+            "overdue": [e["id"] for e in events if e["status"] != "CLOSED" and now > _parse(e["close_due"])],
+            "closed_within_sla": round(sum(_parse(e["closed_at"]) <= _parse(e["close_due"]) for e in closed) / len(closed), 3) if closed else None,
+            "mean_hours_to_close": round(sum((_parse(e["closed_at"]) - _parse(e["created_at"])).total_seconds() for e in closed) / 3600 / len(closed), 1) if closed else None,
+            "verification_first_pass_rate": round(sum(v == "PASSED" for v in first.values()) / len(first), 3) if first else None,
+            "hotspots": sorted(hotspots.items(), key=lambda kv: -kv[1])[:5],
+        }

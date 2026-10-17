@@ -1,6 +1,0 @@
-{"id":"F01","text":"Worker near unprotected edge at Pier P47 without edge protection","expected_risk":"HIGH","expected_agent":"hse"}
-{"id":"F02","text":"Concrete crack observed on pier P52 after formwork removal","expected_risk":"MEDIUM","expected_agent":"quality"}
-{"id":"F03","text":"Mobile crane lifting activity starts today; verify certificates","expected_risk":"HIGH","expected_agent":"plant"}
-{"id":"F04","text":"Access route blocked by stored materials and crew cannot proceed","expected_risk":"MEDIUM","expected_agent":"construction"}
-{"id":"F05","text":"Work at height platform has incomplete guardrail","expected_risk":"HIGH","expected_agent":"hse"}
-{"id":"F06","text":"Minor housekeeping observation at workface","expected_risk":"LOW","expected_agent":"construction"}

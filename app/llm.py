@@ -1,54 +1,68 @@
+"""Optional OpenAI-compatible model and vision client (DeepSeek, Qwen-VL, OpenAI, Ollama...).
+
+Configured by ``INFRAPILOT_MODEL_BASE_URL``, ``INFRAPILOT_MODEL_API_KEY``
+and ``INFRAPILOT_MODEL``. Without them every model path returns ``None``
+and the runtime stays fully deterministic. Model output is always treated as
+a proposal that the runtime validates.
+"""
 from __future__ import annotations
-import base64, json, os
+
+import json
+import os
+from typing import Protocol
+
 import httpx
 
-BASE = os.getenv("MODEL_BASE_URL", "").rstrip("/")
-KEY = os.getenv("MODEL_API_KEY", "")
-MODEL = os.getenv("MODEL_NAME", "gpt-4.1-mini")
-VISION = os.getenv("VISION_MODEL_NAME", MODEL)
-TIMEOUT = float(os.getenv("MODEL_TIMEOUT_S", "60"))
+
+class Model(Protocol):
+    def complete_json(self, system: str, user: str, schema: dict) -> dict | None: ...
 
 
-def configured() -> bool:
-    return bool(BASE and KEY)
+class OpenAICompatibleModel:
+    def __init__(self, base_url: str, api_key: str, model: str, timeout: float = 45.0) -> None:
+        self.base_url, self.api_key, self.model, self.timeout = base_url.rstrip("/"), api_key, model, timeout
 
-async def json_chat(system: str, user: str, model: str | None = None) -> dict | None:
-    if not configured():
+    def complete_json(self, system: str, user: str, schema: dict) -> dict | None:
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "response_format": {"type": "json_schema", "json_schema": {"name": schema.get("title", "result"), "schema": schema, "strict": True}},
+            "temperature": 0,
+        }
+        try:
+            response = httpx.post(f"{self.base_url}/chat/completions", json=payload, timeout=self.timeout,
+                                  headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {})
+            response.raise_for_status()
+            data = json.loads(response.json()["choices"][0]["message"]["content"])
+            return data if isinstance(data, dict) else None
+        except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError):
+            return None
+
+
+def from_env() -> Model | None:
+    base = os.getenv("INFRAPILOT_MODEL_BASE_URL", "")
+    model = os.getenv("INFRAPILOT_MODEL", "")
+    if not base or not model:
         return None
+    return OpenAICompatibleModel(base, os.getenv("INFRAPILOT_MODEL_API_KEY", ""), model)
+
+
+def _vision(self: OpenAICompatibleModel, system: str, text: str, image_uri: str, schema: dict) -> dict | None:
     payload = {
-        "model": model or MODEL,
-        "messages": [{"role":"system","content":system},{"role":"user","content":user}],
-        "response_format": {"type":"json_object"},
+        "model": self.model,
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": [{"type": "text", "text": text}, {"type": "image_url", "image_url": {"url": image_uri}}]}],
+        "response_format": {"type": "json_schema", "json_schema": {"name": schema.get("title", "result"), "schema": schema, "strict": True}},
         "temperature": 0,
     }
-    headers = {"Authorization": f"Bearer {KEY}", "Content-Type":"application/json"}
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            r = await client.post(f"{BASE}/chat/completions", headers=headers, json=payload)
-            r.raise_for_status()
-            text = r.json()["choices"][0]["message"]["content"]
-            return json.loads(text)
-    except Exception:
+        response = httpx.post(f"{self.base_url}/chat/completions", json=payload, timeout=self.timeout,
+                              headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {})
+        response.raise_for_status()
+        data = json.loads(response.json()["choices"][0]["message"]["content"])
+        return data if isinstance(data, dict) else None
+    except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError):
         return None
 
-async def vision_assess(content: bytes, media_type: str, description: str) -> dict | None:
-    if not configured() or not media_type.startswith("image/"):
-        return None
-    uri = f"data:{media_type};base64,{base64.b64encode(content).decode()}"
-    payload = {
-        "model": VISION,
-        "messages": [
-            {"role":"system","content":"You are a transport-infrastructure field inspection vision model. Return JSON only with hazards(array), objects(array), risk(LOW|MEDIUM|HIGH|CRITICAL), confidence(0..1), uncertainty(array). Do not claim a fact you cannot see."},
-            {"role":"user","content":[{"type":"text","text":description},{"type":"image_url","image_url":{"url":uri}}]},
-        ],
-        "response_format":{"type":"json_object"},
-        "temperature":0,
-    }
-    headers={"Authorization":f"Bearer {KEY}","Content-Type":"application/json"}
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            r=await client.post(f"{BASE}/chat/completions",headers=headers,json=payload)
-            r.raise_for_status()
-            return json.loads(r.json()["choices"][0]["message"]["content"])
-    except Exception:
-        return None
+
+OpenAICompatibleModel.complete_vision = _vision

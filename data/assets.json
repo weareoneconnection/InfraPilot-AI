@@ -1,0 +1,11 @@
+{
+  "project": {"code": "DEMO-RAIL-01", "name": "Synthetic Rail Construction Pilot", "note": "Synthetic assets and coordinates for demonstration."},
+  "assets": [
+    {"id": "P47", "name": "Pier P47 / P47墩", "type": "pier", "lat": 3.139000, "lon": 101.686900, "geofence_m": 120, "zone": "Viaduct V12"},
+    {"id": "P52", "name": "Pier P52 / P52墩", "type": "pier", "lat": 3.141200, "lon": 101.689300, "geofence_m": 120, "zone": "Viaduct V12"},
+    {"id": "P61", "name": "Pier P61 / P61墩", "type": "pier", "lat": 3.145600, "lon": 101.694800, "geofence_m": 120, "zone": "Viaduct V13"},
+    {"id": "S07", "name": "Station S07 / S07车站", "type": "station", "lat": 3.152000, "lon": 101.701500, "geofence_m": 250, "zone": "Station S07"},
+    {"id": "S12", "name": "Station S12 / S12车站", "type": "station", "lat": 3.160400, "lon": 101.712200, "geofence_m": 250, "zone": "Station S12"},
+    {"id": "BRG-03", "name": "Bridge bearing BRG-03 / 支座BRG-03", "type": "bearing", "lat": 3.142800, "lon": 101.691100, "geofence_m": 80, "zone": "Viaduct V12"}
+  ]
+}

@@ -1,95 +1,166 @@
+"""InfraPilot AI API and field console."""
 from __future__ import annotations
-import asyncio
-from pathlib import Path
+
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
-from .db import init_db, connect
-from .models import EventCreate, ApprovalRequest, DispatchRequest, ReinspectionRequest, GoldenDemoRequest
-from . import service
+from pydantic import BaseModel, Field
+
+from . import __version__
+from .llm import from_env
+from .service import FieldPilot, GateError, StateError
+from .store import Store
+from .synthetic import photo
+
+BASE = Path(__file__).resolve().parent
+pilot: FieldPilot | None = None
+
+
+def p() -> FieldPilot:
+    assert pilot is not None
+    return pilot
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    global pilot
+    pilot = FieldPilot(Store(), model=from_env())
     yield
 
-app=FastAPI(title="InfraPilot AI",version="1.0.0",description="Transport infrastructure field multimodal autonomous sensing and closed-loop response", lifespan=lifespan)
 
-STATIC=Path(__file__).parent/'static'
-app.mount('/static',StaticFiles(directory=STATIC),name='static')
+app = FastAPI(title="InfraPilot AI", version=__version__, lifespan=lifespan,
+              description="Transport infrastructure field perception and closed-loop rectification")
 
-@app.get('/',include_in_schema=False)
-def home(): return FileResponse(STATIC/'index.html')
 
-@app.get('/health')
-def health(): return {"status":"ok","product":"InfraPilot AI","version":"1.0.0","architecture":"sense-decide-act-verify"}
+class ReportIn(BaseModel):
+    description: str = Field(min_length=4, max_length=8000)
+    reporter: str = Field(default="现场人员", max_length=120)
+    reported_risk: str = Field(default="AUTO", pattern="^(AUTO|LOW|MEDIUM|HIGH|CRITICAL)$")
+    asset_id: str | None = None
+    qr: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    photos: list[str] = Field(default_factory=list)
 
-@app.get('/projects')
-def projects():
-    with connect() as c: return [dict(r) for r in c.execute("SELECT * FROM projects ORDER BY id")]
 
-@app.post('/media',status_code=201)
-async def media(file:UploadFile=File(...)):
-    content=await file.read(25*1024*1024+1)
-    if len(content)>25*1024*1024: raise HTTPException(413,'file too large')
-    try:return service.store_media(content,file.content_type)
-    except ValueError as e:raise HTTPException(415,str(e))
+class Actor(BaseModel):
+    actor: str = Field(min_length=1, max_length=120)
 
-@app.get('/media/{sha}')
-def media_get(sha:str):
-    with connect() as c:r=c.execute("SELECT * FROM media WHERE sha256=?",(sha,)).fetchone()
-    if not r:raise HTTPException(404,'media not found')
-    return Response(bytes(r['content']),media_type=r['media_type'],headers={'ETag':sha,'X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=86400'})
 
-@app.post('/events',status_code=201)
-async def create(payload:EventCreate):
-    try:return await service.create_event(payload.model_dump())
-    except ValueError as e:raise HTTPException(422,str(e))
+class TaskDone(Actor):
+    note: str = Field(default="", max_length=2000)
 
-@app.get('/events/{event_id}')
-def get_event(event_id:str):
-    try:return service.get_event(event_id)
-    except KeyError:raise HTTPException(404,'event not found')
 
-@app.post('/events/{event_id}/analyze')
-def analyze(event_id:str):
-    try:return service.analyze(event_id)
-    except KeyError:raise HTTPException(404,'event not found')
+class ReinspectIn(BaseModel):
+    inspector: str = Field(min_length=1, max_length=120)
+    observation: str = Field(min_length=2, max_length=4000)
+    resolved: bool
+    photos: list[str] = Field(default_factory=list)
+    attest_location: bool = False
 
-@app.post('/events/{event_id}/approve')
-def approve(event_id:str,payload:ApprovalRequest):
-    try:return service.approve(event_id,payload.actor)
-    except KeyError:raise HTTPException(404,'event not found')
-    except ValueError as e:raise HTTPException(409,str(e))
 
-@app.post('/events/{event_id}/dispatch')
-def dispatch(event_id:str,payload:DispatchRequest):
-    try:return service.dispatch(event_id,payload.actor)
-    except KeyError:raise HTTPException(404,'event not found')
-    except ValueError as e:raise HTTPException(409,str(e))
+def call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except KeyError as exc:
+        raise HTTPException(404, f"not found: {str(exc).strip(chr(39))}")
+    except GateError as exc:
+        raise HTTPException(403, str(exc))
+    except StateError as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
-@app.post('/events/{event_id}/reinspect')
-def reinspect(event_id:str,payload:ReinspectionRequest):
-    try:return service.reinspect(event_id,payload.observation,payload.resolved,payload.media_sha,payload.actor)
-    except KeyError:raise HTTPException(404,'event not found')
-    except ValueError as e:raise HTTPException(409,str(e))
 
-@app.post('/events/{event_id}/close')
-def close(event_id:str):
-    try:return service.close(event_id)
-    except KeyError:raise HTTPException(404,'event not found')
-    except ValueError as e:raise HTTPException(409,str(e))
+@app.get("/health")
+def health():
+    return {"status": "ok", "product": "InfraPilot AI", "version": __version__, "vision": "configured" if p().model else "not configured",
+            "assets": len(p().assets)}
 
-@app.get('/dashboard')
-def dashboard(): return service.dashboard()
 
-@app.post('/demo/golden')
-async def golden(payload:GoldenDemoRequest):
-    event=await service.create_event({"project_id":1,"description":payload.description,"event_type":"hse","reported_risk":"AUTO","asset_ref":payload.asset_ref})
-    event=service.analyze(event['id'])
-    event=service.approve(event['id'],'demo_project_manager')
-    event=service.dispatch(event['id'],'demo_site_manager')
-    event=service.reinspect(event['id'],'Edge protection installed and workface re-inspected before restart.',True,None,'demo_inspector')
-    event=service.close(event['id'],'demo_project_manager')
-    return {"story":"Sense -> Understand -> Decide -> Human Gate -> Act -> Verify -> Close","event":event}
+@app.get("/assets")
+def assets():
+    return list(p().assets.values())
+
+
+@app.post("/media", status_code=201)
+async def upload(file: UploadFile = File(...)):
+    content = await file.read(25 * 1024 * 1024 + 1)
+    try:
+        return p().store_media(content)
+    except ValueError as exc:
+        raise HTTPException(415 if "signature" in str(exc) else 413, str(exc))
+
+
+@app.get("/media/{sha}")
+def media(sha: str):
+    row = call(p().media, sha, True)
+    return Response(bytes(row["content"]), media_type=row["media_type"],
+                    headers={"ETag": sha, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=86400"})
+
+
+@app.post("/events", status_code=201)
+def report(payload: ReportIn):
+    return call(p().report, **payload.model_dump())
+
+
+@app.get("/events")
+def board():
+    return p().board()
+
+
+@app.get("/events/{event_id}")
+def event(event_id: str):
+    return call(p().event, event_id)
+
+
+@app.post("/events/{event_id}/analyse")
+def analyse(event_id: str):
+    return call(p().analyse, event_id)
+
+
+@app.post("/events/{event_id}/approve")
+def approve(event_id: str, body: Actor):
+    return call(p().approve, event_id, body.actor)
+
+
+@app.post("/events/{event_id}/dispatch")
+def dispatch(event_id: str, body: Actor):
+    return call(p().dispatch, event_id, body.actor)
+
+
+@app.post("/tasks/{task_id}/done")
+def task_done(task_id: str, body: TaskDone):
+    return call(p().complete_task, task_id, body.actor, body.note)
+
+
+@app.post("/events/{event_id}/reinspect")
+def reinspect(event_id: str, body: ReinspectIn):
+    return call(p().reinspect, event_id, **body.model_dump())
+
+
+@app.post("/events/{event_id}/close")
+def close(event_id: str, body: Actor):
+    return call(p().close, event_id, body.actor)
+
+
+@app.get("/dashboard")
+def dashboard():
+    return p().dashboard()
+
+
+@app.post("/demo/photo", status_code=201)
+def demo_photo(scene: str = "before", asset_id: str = "P47", minutes_from_now: int = 0, at_asset: bool = True, variant: int = 0):
+    """Generate a synthetic site photo with EXIF time and GPS (demo only; not a real photo)."""
+    asset = p().assets.get(asset_id) or next(iter(p().assets.values()))
+    lat, lon = (asset["lat"] + 0.0002, asset["lon"] + 0.0002) if at_asset else (asset["lat"] + 0.05, asset["lon"] + 0.05)
+    taken = datetime.now(timezone.utc) + timedelta(minutes=minutes_from_now)
+    return p().store_media(photo(scene, captured_at=taken.replace(tzinfo=None), lat=lat, lon=lon, variant=variant))
+
+
+@app.get("/", include_in_schema=False)
+def home():
+    return FileResponse(BASE / "static" / "index.html")
