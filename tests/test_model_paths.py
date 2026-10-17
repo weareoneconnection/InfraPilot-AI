@@ -22,6 +22,14 @@ def test_text_model_can_only_raise_risk_with_a_quote(tmp_path):
     assert "model:exposed_live_parts" in e["signals"] and "model:collapse" not in e["signals"]
 
 
+def test_model_label_must_be_named_by_its_quote(tmp_path):
+    # A crack quoted as a "collapse" is discarded, so it cannot escalate to CRITICAL or stop work.
+    fp = FieldPilot(Store(tmp_path / "c.db"), model=Scripted(hazards={"hazards": [
+        {"label": "collapse", "confidence": 0.9, "quote": "混凝土出现裂缝"}]}))
+    e = fp.report(description="P52墩柱混凝土出现裂缝", reporter="x")
+    assert e["final_risk"] == "MEDIUM" and e["model_risk"] is None and not e["stop_work"]
+
+
 def test_model_finding_must_cite_retrieved_sources(tmp_path):
     fp = FieldPilot(Store(tmp_path / "b.db"), model=Scripted(finding={"claim": "立即停止 P47 临边作业，设置防护栏杆后复工。",
                                                                   "evidence_refs": ["HSE-WAH-001", "FAKE-001"], "questions": []}))

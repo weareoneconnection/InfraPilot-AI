@@ -16,6 +16,22 @@ from datetime import datetime
 from PIL import Image
 
 from .llm import Model
+from .text import matched
+
+# A model-reported hazard counts only if the words it quotes name that hazard; this stops a model
+# from labelling "a crack" as a collapse and, with risk never lowered, stopping work for nothing.
+HAZARD_CUES = {
+    "unprotected_edge": ["临边", "无防护", "栏杆", "护栏", "edge", "guardrail", "handrail"],
+    "no_fall_protection": ["安全带", "坠落防护", "防坠", "harness", "fall protection", "fall arrest", "lanyard"],
+    "suspended_load": ["吊", "起重", "crane", "lift", "lifting", "suspended", "load"],
+    "open_excavation": ["基坑", "开挖", "沟槽", "excavation", "trench", "pit"],
+    "exposed_live_parts": ["带电", "漏电", "触电", "裸露", "露出铜线", "live", "exposed", "electric", "shock"],
+    "collapse": ["坍塌", "倒塌", "垮塌", "塌方", "collapse", "collapsed"],
+    "structural_crack": ["裂缝", "开裂", "crack", "cracking"],
+    "blocked_access": ["堵塞", "通道", "blocked", "obstructed", "access"],
+    "poor_housekeeping": ["杂物", "边角料", "文明施工", "debris", "housekeeping", "offcuts"],
+    "missing_ppe": ["安全帽", "反光衣", "防护用品", "helmet", "ppe", "hard hat", "vest"],
+}
 
 HAZARD_TAXONOMY = {
     "unprotected_edge": "HIGH", "no_fall_protection": "HIGH", "suspended_load": "HIGH", "open_excavation": "HIGH",
@@ -138,5 +154,6 @@ def text_hazards(model: Model | None, description: str) -> dict | None:
         return None
     kept = [h for h in out.get("hazards", []) if isinstance(h, dict) and h.get("label") in HAZARD_TAXONOMY
             and isinstance(h.get("confidence"), (int, float)) and h["confidence"] >= 0.5
-            and len(str(h.get("quote", "")).strip()) >= 2 and str(h["quote"]).strip() in description]
+            and len(str(h.get("quote", "")).strip()) >= 2 and str(h["quote"]).strip() in description
+            and matched(str(h["quote"]), HAZARD_CUES[h["label"]])]
     return {"hazards": kept}
