@@ -31,7 +31,12 @@ def test_api_closed_loop():
         assert evidence["schema"] == "infrapilot.evidence.v1"
         assert evidence["event"]["id"] == eid
         assert len(evidence["digest"]) == 64
-        assert c.get("/").status_code == 200
+        page = c.get("/")
+        assert page.status_code == 200
+        assert 'id="after-file"' in page.text
+        assert "demoPhoto('after',state.after)" in page.text
+        assert "afterPhotos" not in page.text
+        assert "请先拍摄、选择或生成整改后照片" in page.text
 
 
 def test_mcp_tools(tmp_path):
