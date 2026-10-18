@@ -360,12 +360,21 @@ class FieldPilot:
         located = [m for m in images if m.get("lat") is not None]
         at_asset = bool(asset) and bool(located) and all(distance_m(m["lat"], m["lon"], asset["lat"], asset["lon"]) <= asset["geofence_m"] for m in located)
         executors = {t["done_by"] for t in tasks if t["done_by"]}
+        incomplete_tasks = [{"id": t["id"], "title": t["title"], "status": t["status"]}
+                            for t in tasks if t["status"] != "DONE"]
+        vision_hazards_found = []
         hazard_cleared = resolved
         if self.model is not None:
             for m in images:
                 v = vision_hazards(self.model, self.media(m["sha256"], True)["content"], m["media_type"], observation)
                 if v and v["hazards"]:
                     hazard_cleared = False
+                    vision_hazards_found.extend({
+                        "photo_sha256": m["sha256"],
+                        "label": h["label"],
+                        "confidence": h["confidence"],
+                        "visible_evidence": h["visible_evidence"],
+                    } for h in v["hazards"])
         checks = {
             "all_tasks_done": bool(tasks) and all(t["status"] == "DONE" for t in tasks),
             "after_photo_present": bool(images),
@@ -376,9 +385,21 @@ class FieldPilot:
             "hazard_cleared": hazard_cleared,
         }
         passed = all(checks.values())
+        failure_messages = {
+            "all_tasks_done": "存在未完成的整改任务",
+            "after_photo_present": "缺少整改后照片",
+            "after_photo_is_new": "整改后照片与整改前证据重复或高度相似",
+            "after_photo_after_dispatch": "整改后照片的拍摄时间早于任务派发",
+            "after_photo_at_asset": "照片不在目标构件电子围栏内，且未进行现场位置确认",
+            "inspector_independent": "复检人与上报人或整改执行人不独立",
+            "hazard_cleared": "整改后照片仍存在可见隐患",
+        }
+        failure_reasons = [{"code": key, "message": failure_messages[key]} for key, value in checks.items() if not value]
         payload = {"inspector": inspector, "observation": observation, "checks": checks, "passed": passed,
                    "location_basis": "photo_gps" if at_asset else ("inspector_attestation" if attest_location else "none"),
-                   "reused_photos": reused, "after_photos": [m["sha256"] for m in after]}
+                   "reused_photos": reused, "after_photos": [m["sha256"] for m in after],
+                   "incomplete_tasks": incomplete_tasks, "vision_hazards": vision_hazards_found,
+                   "failure_reasons": failure_reasons}
         with self.store.tx() as c:
             for s in photos:
                 c.execute("INSERT OR IGNORE INTO event_media VALUES(?,?,?,?,?)", (event_id, s, "after", inspector, self.now()))

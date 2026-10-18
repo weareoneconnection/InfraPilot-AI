@@ -53,6 +53,32 @@ def test_failed_reinspection_can_be_repeated():
     assert fp.reinspect(ev["id"], inspector="安全员 周工", observation="复检合格", resolved=True, photos=[good["sha256"]])["status"] == "VERIFIED"
 
 
+class ResidualVisionModel:
+    def complete_json(self, system, user, schema):
+        return None
+
+    def complete_vision(self, system, text, uri, schema):
+        return {"hazards": [{"label": "unprotected_edge", "confidence": 0.91,
+                             "visible_evidence": "guardrail opening remains visible"}]}
+
+
+def test_failed_reinspection_explains_incomplete_tasks_and_visual_hazards():
+    fp, clock = fresh()
+    fp.model = ResidualVisionModel()
+    ev, _ = run_to_dispatch(fp, clock, photo("before", captured_at=naive(T0), lat=P47[0], lon=P47[1]))
+    clock.t += timedelta(hours=1)
+    after = fp.store_media(photo("after", captured_at=naive(clock.t), lat=P47[0], lon=P47[1]))
+    result = fp.reinspect(ev["id"], inspector="安全员 周工", observation="整改完成", resolved=True,
+                          photos=[after["sha256"]])
+    receipt = [r for r in result["receipts"] if r["kind"] == "verification"][-1]
+    payload = receipt["payload"]
+    assert result["status"] == "VERIFICATION_FAILED"
+    assert payload["incomplete_tasks"][0]["status"] == "DISPATCHED"
+    assert payload["vision_hazards"] == [{"photo_sha256": after["sha256"], "label": "unprotected_edge",
+                                           "confidence": 0.91, "visible_evidence": "guardrail opening remains visible"}]
+    assert {reason["code"] for reason in payload["failure_reasons"]} == {"all_tasks_done", "hazard_cleared"}
+
+
 def test_task_needs_dispatch_and_a_human():
     fp, clock = fresh()
     ev = fp.report(description=EDGE, reporter="x")

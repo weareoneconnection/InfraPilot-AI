@@ -36,7 +36,9 @@ def test_api_closed_loop():
         assert 'id="after-file"' in page.text
         assert "demoPhoto('after',state.after)" in page.text
         assert "afterPhotos" not in page.text
-        assert "请先拍摄、选择或生成整改后照片" in page.text
+        assert "尚有 ${incomplete.length} 项整改任务未完成" in page.text
+        assert 'id="verification-guidance"' in page.text
+        assert "vision_hazards" in page.text
 
 
 def test_mcp_tools(tmp_path):
