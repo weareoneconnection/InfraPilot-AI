@@ -3,7 +3,7 @@
 ```text
  Seven-workspace field operating system
  Command center · Mobile intake · Event workspace · Spatial twin
- Independent verification · Analytics · Agent directory · 4-minute demo
+ Independent verification · Analytics · Agent directory
                  │
  Field console (mobile-first) · REST API · Evidence export
                  │
