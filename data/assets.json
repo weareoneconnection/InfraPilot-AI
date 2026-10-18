@@ -1,5 +1,18 @@
 {
-  "project": {"code": "DEMO-RAIL-01", "name": "Synthetic Rail Construction Pilot", "note": "Synthetic assets and coordinates for demonstration."},
+  "project": {
+    "code": "MY-RAIL-A",
+    "name": "马来西亚城市轨道示范项目 A",
+    "name_en": "Malaysia Urban Rail Demonstration Project A",
+    "country": "马来西亚",
+    "city": "吉隆坡",
+    "mode": "城市轨道交通",
+    "package": "土建与车站标段",
+    "phase": "施工建造",
+    "progress": 68,
+    "coordinate_system": "WGS84",
+    "data_classification": "合成演示数据",
+    "note": "Synthetic assets and coordinates for demonstration. No owner or project-sensitive data."
+  },
   "assets": [
     {"id": "P47", "name": "Pier P47 / P47墩", "type": "pier", "lat": 3.139000, "lon": 101.686900, "geofence_m": 120, "zone": "Viaduct V12"},
     {"id": "P52", "name": "Pier P52 / P52墩", "type": "pier", "lat": 3.141200, "lon": 101.689300, "geofence_m": 120, "zone": "Viaduct V12"},

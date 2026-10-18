@@ -22,6 +22,15 @@ def test_api_closed_loop():
         assert c.get(f"/media/{after}").headers["content-type"] == "image/jpeg"
         assert c.post("/media", files={"file": ("x.html", b"<html>", "text/html")}).status_code == 415
         assert c.get("/dashboard").json()["events"] >= 1
+        workspace = c.get("/workspace").json()
+        assert workspace["project"]["code"] == "MY-RAIL-A"
+        assert len(workspace["agents"]) == 7
+        assert len(workspace["lifecycle"]) == 9
+        assert len(workspace["verification_contract"]) == 7
+        evidence = c.get(f"/events/{eid}/evidence").json()
+        assert evidence["schema"] == "infrapilot.evidence.v1"
+        assert evidence["event"]["id"] == eid
+        assert len(evidence["digest"]) == 64
         assert c.get("/").status_code == 200
 
 

@@ -87,6 +87,11 @@ def assets():
     return list(p().assets.values())
 
 
+@app.get("/workspace")
+def workspace():
+    return p().workspace()
+
+
 @app.post("/media", status_code=201)
 async def upload(file: UploadFile = File(...)):
     content = await file.read(25 * 1024 * 1024 + 1)
@@ -116,6 +121,11 @@ def board():
 @app.get("/events/{event_id}")
 def event(event_id: str):
     return call(p().event, event_id)
+
+
+@app.get("/events/{event_id}/evidence")
+def evidence(event_id: str):
+    return call(p().evidence_bundle, event_id)
 
 
 @app.post("/events/{event_id}/analyse")

@@ -48,6 +48,34 @@ SPECIALISTS = {
                      "action": "Re-sequence the workface and brief the crew on the corrective measure / 调整作业面安排并向班组交底整改措施"},
 }
 
+CONTROL_AGENTS = [
+    {"id": "perception", "name": "现场感知智能体", "role": "多模态感知", "contract": "文字、照片、EXIF、二维码与GPS联合定位"},
+    {"id": "orchestrator", "name": "项目调度智能体", "role": "受控编排", "contract": "按领域证据组队，不替代具名人员审批"},
+    {"id": "verification", "name": "独立核验智能体", "role": "关闭闸门", "contract": "七项检查全部通过后才允许关闭"},
+]
+
+LIFECYCLE = [
+    {"id": "sense", "name": "感知", "description": "文字、照片、定位、扫码"},
+    {"id": "locate", "name": "定位", "description": "映射到构件与电子围栏"},
+    {"id": "assess", "name": "风险", "description": "多源融合，只升不降"},
+    {"id": "reason", "name": "研判", "description": "专业智能体引用受控依据"},
+    {"id": "approve", "name": "审批", "description": "具名人员批准"},
+    {"id": "dispatch", "name": "派发", "description": "责任角色与SLA"},
+    {"id": "rectify", "name": "整改", "description": "任务完成与回执"},
+    {"id": "verify", "name": "复检", "description": "独立人员七项核验"},
+    {"id": "learn", "name": "沉淀", "description": "关闭事件形成先例"},
+]
+
+VERIFICATION_CONTRACT = [
+    {"id": "all_tasks_done", "name": "全部任务完成"},
+    {"id": "after_photo_present", "name": "存在整改后照片"},
+    {"id": "after_photo_is_new", "name": "照片未复用或翻拍"},
+    {"id": "after_photo_after_dispatch", "name": "派发后拍摄"},
+    {"id": "after_photo_at_asset", "name": "位于构件电子围栏"},
+    {"id": "inspector_independent", "name": "复检人员独立"},
+    {"id": "hazard_cleared", "name": "隐患已经消除"},
+]
+
 
 class GateError(PermissionError):
     pass
@@ -84,12 +112,38 @@ class FieldPilot:
         self.model = model
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         registry = json.loads(Path(assets_path).read_text(encoding="utf-8"))
-        self.project = registry["project"]["code"]
+        self.project_meta = registry["project"]
+        self.project = self.project_meta["code"]
         self.assets = {a["id"]: a for a in registry["assets"]}
         self.index = KnowledgeIndex(load_packs(PACKS))
 
     def now(self) -> str:
         return _iso(self.clock())
+
+    def workspace(self) -> dict:
+        """Presentation-safe project, agent and evidence-contract metadata."""
+        domain_agents = [
+            {"id": sid, "name": spec["name"], "role": spec["owner"], "contract": spec["action"]}
+            for sid, spec in SPECIALISTS.items()
+        ]
+        return {
+            "project": self.project_meta,
+            "assets": list(self.assets.values()),
+            "agents": CONTROL_AGENTS + domain_agents,
+            "lifecycle": LIFECYCLE,
+            "verification_contract": VERIFICATION_CONTRACT,
+            "model": self.model.describe() if self.model else {"status": "rules_fallback", "label": "确定性规则回退"},
+            "demo_scenarios": [
+                {"id": "work_at_height", "label": "高处作业防护缺失", "asset_id": "P47", "risk": "HIGH",
+                 "text": "P47墩临边防护缺失，工人在高处作业未系安全带，下午还要继续施工。"},
+                {"id": "lifting", "label": "吊装设备证书过期", "asset_id": "S12", "risk": "HIGH",
+                 "text": "S12车站明天汽车吊吊装钢梁，起重机检验证书已经过期。"},
+                {"id": "quality", "label": "混凝土蜂窝裂缝", "asset_id": "P52", "risk": "MEDIUM",
+                 "text": "P52墩柱拆模后发现混凝土蜂窝和裂缝，需要质量与工程联合研判。"},
+                {"id": "asset", "label": "桥梁支座锈蚀", "asset_id": "BRG-03", "risk": "MEDIUM",
+                 "text": "BRG-03支座巡检发现锈蚀和异常位移，需要安排检测与处置。"},
+            ],
+        }
 
     def _audit(self, c, event_id, actor, action, detail) -> None:
         c.execute("INSERT INTO audit(event_id,actor,action,detail,created_at) VALUES(?,?,?,?,?)",
@@ -371,6 +425,18 @@ class FieldPilot:
         ev["precedents"] = self.precedents(ev)
         return ev
 
+    def evidence_bundle(self, event_id: str) -> dict:
+        """Portable, content-addressed evidence snapshot without media bytes."""
+        event = self.event(event_id)
+        bundle = {
+            "schema": "infrapilot.evidence.v1",
+            "generated_at": self.now(),
+            "project": self.project_meta,
+            "event": event,
+            "contract": VERIFICATION_CONTRACT,
+        }
+        return {**bundle, "digest": _digest(bundle)}
+
     def precedents(self, ev: dict) -> list[dict]:
         """Closed events on the same asset or with a shared signal: what was done and how long it took."""
         out = []
@@ -399,9 +465,15 @@ class FieldPilot:
         for v in verifications:
             first.setdefault(v["event_id"], v["status"])
         hotspots: dict[str, int] = {}
+        zones: dict[str, int] = {}
         for e in events:
             if e["asset_id"]:
                 hotspots[e["asset_id"]] = hotspots.get(e["asset_id"], 0) + 1
+                zone = self.assets.get(e["asset_id"], {}).get("zone", "未分区")
+                zones[zone] = zones.get(zone, 0) + 1
+        agent_rows = self.store.rows("SELECT agent_id,COUNT(*) AS count FROM findings GROUP BY agent_id ORDER BY count DESC")
+        receipt_rows = self.store.rows("SELECT kind,status,COUNT(*) AS count FROM receipts GROUP BY kind,status")
+        covered_assets = {e["asset_id"] for e in events if e["asset_id"]}
         now = self.clock()
         return {
             "events": len(events),
@@ -413,4 +485,11 @@ class FieldPilot:
             "mean_hours_to_close": round(sum((_parse(e["closed_at"]) - _parse(e["created_at"])).total_seconds() for e in closed) / 3600 / len(closed), 1) if closed else None,
             "verification_first_pass_rate": round(sum(v == "PASSED" for v in first.values()) / len(first), 3) if first else None,
             "hotspots": sorted(hotspots.items(), key=lambda kv: -kv[1])[:5],
+            "zones": sorted(({"zone": k, "events": v} for k, v in zones.items()), key=lambda x: -x["events"]),
+            "agents": agent_rows,
+            "receipts": receipt_rows,
+            "assets_covered": len(covered_assets),
+            "asset_coverage": round(len(covered_assets) / len(self.assets), 3) if self.assets else 0,
+            "closure_rate": round(len(closed) / len(events), 3) if events else 0,
+            "evidence_receipts": sum(r["count"] for r in receipt_rows),
         }

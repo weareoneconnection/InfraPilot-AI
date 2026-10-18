@@ -1,7 +1,11 @@
 # Architecture
 
 ```text
- Field console (mobile-first) · REST API
+ Seven-workspace field operating system
+ Command center · Mobile intake · Event workspace · Spatial twin
+ Independent verification · Analytics · Agent directory · 4-minute demo
+                 │
+ Field console (mobile-first) · REST API · Evidence export
                  │
             FieldPilot service
  ┌───────────┬────────────┬────────────┬──────────────┬─────────────┐
@@ -14,6 +18,8 @@
                  │
   SQLite: media · events · findings · tasks · receipts · audit   +  asset registry (JSON)
 ```
+
+The presentation layer reads its project and governance contract from `GET /workspace`, rather than duplicating this metadata in the UI. The spatial twin is a lightweight WGS84 asset graph rendered without an external map dependency; the registered asset model is ready to be replaced or augmented by GeoJSON, IFC, GLTF or 3D Tiles adapters. `GET /events/{event_id}/evidence` returns a media-byte-free, content-addressed evidence snapshot suitable for audit or downstream project systems.
 
 | Module | Responsibility |
 | --- | --- |
