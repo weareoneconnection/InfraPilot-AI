@@ -15,7 +15,7 @@ EXPOSED = ["report_observation", "get_event", "list_events", "field_dashboard", 
 
 
 def build_server(pilot: FieldPilot) -> MCPServer:
-    server = MCPServer("InfraPilot AI", version="2.0.0",
+    server = MCPServer("InfraPilot AI", version="2.1.0",
                        instructions="Field events with risk, SLA, evidence-backed plans and independent re-inspection.")
 
     @server.tool()

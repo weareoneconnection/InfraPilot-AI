@@ -4,6 +4,9 @@ from fastapi.testclient import TestClient
 def test_api_closed_loop():
     from app.main import app
     with TestClient(app) as c:
+        health = c.get("/health").json()
+        assert health["status"] == "ok"
+        assert health["version"] == "2.1.0"
         before = c.post("/demo/photo", params={"scene": "before", "asset_id": "P47"}).json()["sha256"]
         e = c.post("/events", json={"description": "P47墩临边防护缺失，工人未系安全带", "reporter": "班组长 李明", "photos": [before]}).json()
         eid = e["id"]
