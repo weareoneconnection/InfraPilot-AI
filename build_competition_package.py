@@ -133,7 +133,10 @@ def main() -> None:
 
     deliverables = [SOURCE_ZIP, PACKAGE_ZIP, REPORT_DOCX, REPORT_PDF, VIDEO]
     OUTER_SUMS.write_text(
-        "".join(f"{sha256(path)}  {path.name}\n" for path in deliverables),
+        "".join(
+            f"{sha256(path)}  {path.relative_to(FINAL_DIR).as_posix()}\n"
+            for path in deliverables
+        ),
         encoding="utf-8",
     )
     print(f"Built {PACKAGE_ZIP}")
